@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Delivery  events to topic
+Transform: "AWS::Serverless-2016-10-31"
+
+Parameters:
+
+  ProjectIdentifier:
+    Description: >
+      An unique identifier for the project, must be identical in all templates deployed using same artifact bucket.
+    Type: String
+    Default: samwise
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
+    ConstraintDescription: Only alphanumeric string is allowed.
+
+  NotificationTopic:
+    Description: >
+      SNS notification topic name
+    Type: String
+
+Resources:
+  PipelineEventCallback:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: main.lambda_handler
+      Runtime: python3.7
+      CodeUri: lambdas/pipeline_event_callback
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          PIPELINE_PREFIX: !Sub ${ProjectIdentifier}-
+          SNS_TOPIC_ARN: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${NotificationTopic}
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !Ref NotificationTopic
+
+      Events:
+        # All CodePipeline Events
+        CodePipelineEvent:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Pipeline Execution State Change
+        # Action Failures
+        CodePipelineActionEvent:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                state:
+                  - FAILED
+                  - CANCELED

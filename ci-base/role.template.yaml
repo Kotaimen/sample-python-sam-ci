@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cross account roles to be assumed by CodePipeline service in tools account.
+
+Parameters:
+
+  ToolsAccount:
+    Description: >
+      AWS AccountNumber for tools (pipelines and artifact infra)
+    Type: String
+
+  ArtifactBucket:
+    Description: >
+      Artifact bucket in Tools Account, which holds build artifacts and caches.
+    Type: String
+
+  KmsKeyArn:
+    Description: ARN of the KMS CMK creates in Tools account
+    Type: String
+
+  ProjectIdentifier:
+    Description: >
+      An unique identifier for the project, must be identical in all templates deployed using same artifact bucket.
+    Type: String
+    Default: samwise
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
+    ConstraintDescription: Only alphanumeric string is allowed.
+
+  PermissionsBoundary:
+    Description: >
+      ARN of the policy used to set the permissions boundary for the canned CloudFormation deploy role,
+      which assumes administrator access.
+      Setting this to empty string disables PermissionsBoundary.
+    Type: String
+    Default: ""
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Tools Account Configuration
+        Parameters:
+          - ToolsAccount
+          - ArtifactBucket
+          - KmsKeyArn
+      - Label:
+          default: Project Configuration
+        Parameters:
+          - ProjectIdentifier
+      - Label:
+          default: Misc
+        Parameters:
+          - PermissionsBoundary
+    ParameterLabels:
+      ToolsAccount:
+        default: Tools Account
+      ArtifactBucket:
+        default: Artifact Bucket
+      KmsKeyArn:
+        default: KMS Key ARN
+      ProjectIdentifier:
+        default: Project Identifier
+      PermissionsBoundary:
+        default: Permissions Boundary
+
+
+Conditions:
+  PermissionsBoundaryCondition: !Not [!Equals [!Ref PermissionsBoundary, ""]]
+
+Resources:
+
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectIdentifier}-CrossAccountRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${ToolsAccount}:root
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  CrossAccountPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectIdentifier}-CrossAccountPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:*
+              - s3:*
+              - iam:PassRole
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref KmsKeyArn
+      Roles:
+        - !Ref CrossAccountRole
+
+  CloudFormationDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectIdentifier}-CloudFormationDeployRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      PermissionsBoundary: !If [ PermissionsBoundaryCondition, !Ref PermissionsBoundary, !Ref "AWS::NoValue" ]
+
+  CloudFormationDeployPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectIdentifier}-CloudFormationDeployPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - !Sub "arn:aws:s3:::${ArtifactBucket}/*"
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${ArtifactBucket}"
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref KmsKeyArn
+      Roles:
+        - !Ref CloudFormationDeployRole
+
+Outputs:
+  StackName:
+    Description: Name of the current stack
+    Value: !Ref AWS::StackName
+
+  CrossAccountRoleArn:
+    Description: CodePipeline role Arn
+    Value: !GetAtt CrossAccountRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CrossAccountRoleArn
+
+  CloudFormationDeployRoleArn:
+    Description: CloudFomration deploy role Arn
+    Value: !GetAtt CloudFormationDeployRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CloudFormationDeployRoleArn

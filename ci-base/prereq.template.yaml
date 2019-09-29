@@ -1,0 +1,564 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cross account CloudFormation CodePipeline pre-requests, including KMS key, encrypted Artifact bucket, shared
+  CedePipeline and CodeBuild roles, and notification SNS.
+
+Parameters:
+
+  DevAccount:
+    Description: >
+      AWS AccountNumber for development stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  TestAccount:
+    Description: >
+      AWS AccountNumber for testing stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  StagingAccount:
+    Description: >
+      AWS AccountNumber for staging stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  ProductionAccount:
+    Description: >
+      AWS AccountNumber for production stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  ProjectIdentifier:
+    Description: >
+      An unique identifier for the project, must be identical in all templates deployed using same artifact bucket.
+    Type: String
+    Default: samwise
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
+    ConstraintDescription: Only alphanumeric string is allowed.
+
+  PermissionsBoundary:
+    Description: >
+      ARN of the policy used to set the permissions boundary for the canned CloudFormation deploy role,
+      which assumes administrator access.
+      Setting this to empty string disables PermissionsBoundary.
+    Type: String
+    Default: ""
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Pipeline Configuration
+        Parameters:
+          - DevAccount
+          - TestAccount
+          - StagingAccount
+          - ProductionAccount
+      - Label:
+          default: Project Configuration
+        Parameters:
+          - ProjectIdentifier
+      - Label:
+          default: Misc
+        Parameters:
+          - PermissionsBoundary
+    ParameterLabels:
+      DevAccount:
+        default: Development Account
+      TestAccount:
+        default: Testing Account
+      DevelopEnvironment:
+        default: Development Account
+      ProductionAccount:
+        default: Production Account
+      ProjectIdentifier:
+        default: Project Identifier
+      PermissionsBoundary:
+        default: Permissions Boundary
+
+Conditions:
+  #  Detect "same account" situation
+  DevCrossAccountCondition: !Not [!Equals [!Ref DevAccount, !Ref "AWS::AccountId"]]
+  TestCrossAccountCondition: !Not [!Equals [!Ref TestAccount, !Ref "AWS::AccountId"]]
+  StagingCrossAccountCondition: !Not [!Equals [!Ref StagingAccount, !Ref "AWS::AccountId"]]
+  ProdCrossAccountCondition: !Not [!Equals [!Ref ProductionAccount, !Ref "AWS::AccountId"]]
+
+  # Stages to enable
+  EnableDevelopStageCondition: !Not [!Equals [!Ref DevAccount, ""]]
+  EnableTestStageCondition: !Not [!Equals [!Ref TestAccount, ""]]
+  EnableStagingStageCondition: !Not [!Equals [!Ref StagingAccount, ""]]
+  EnableProductionStageCondition: !Not [!Equals [!Ref ProductionAccount, ""]]
+
+  # Misc
+  PermissionsBoundaryCondition: !Not [!Equals [!Ref PermissionsBoundary, ""]]
+
+Resources:
+  #
+  # Encryption
+  #
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Used by assumed roles in target accounts to Encrypt/Decrypt artifact
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Ref AWS::StackName
+        Statement:
+          - Sid: Allows admin of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:Delete*
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:root", !Ref "AWS::NoValue" ]
+                - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:root", !Ref "AWS::NoValue" ]
+                - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:root", !Ref "AWS::NoValue" ]
+                - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:root", !Ref "AWS::NoValue" ]
+                - !GetAtt CodeBuildServiceRole.Arn
+                - !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+
+  KMSAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ProjectIdentifier}-pipeline-master
+      TargetKeyId: !Ref KMSKey
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            Prefix: codebuild-cache/
+            NoncurrentVersionExpirationInDays: 1
+          - Status: Enabled
+            Prefix: input-artifacts/
+            NoncurrentVersionExpirationInDays: 30
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSAlias
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              StringEquals:
+                "s3:x-amz-server-side-encryption": AES256
+          - Sid: RequiredKMS
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              StringNotLikeIfExists:
+                "s3:x-amz-server-side-encryption-aws-kms-key-id": !GetAtt KMSKey.Arn
+          - Sid: AllowCrossAccountRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+            Principal:
+              AWS:
+                - !If [ EnableDevelopStageCondition, !Ref DevAccount, !Ref "AWS::NoValue" ]
+                - !If [ EnableTestStageCondition, !Ref TestAccount, !Ref "AWS::NoValue" ]
+                - !If [ EnableStagingStageCondition, !Ref StagingAccount, !Ref "AWS::NoValue" ]
+                - !If [ EnableProductionStageCondition, !Ref ProductionAccount, !Ref "AWS::NoValue" ]
+
+  #
+  # Notifications
+  #
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub "${ProjectIdentifier} CodePipeline Notification"
+
+  NotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowCrossAccountPublish
+          Effect: Allow
+          Principal:
+            AWS:
+              - !Ref AWS::AccountId
+              - !If [ EnableDevelopStageCondition, !Ref DevAccount, !Ref "AWS::NoValue" ]
+              - !If [ EnableTestStageCondition, !Ref TestAccount, !Ref "AWS::NoValue" ]
+              - !If [ EnableStagingStageCondition, !Ref StagingAccount, !Ref "AWS::NoValue" ]
+              - !If [ EnableProductionStageCondition, !Ref ProductionAccount, !Ref "AWS::NoValue" ]
+          Action: sns:Publish
+          Resource: !Ref NotificationTopic
+      Topics:
+        - !Ref NotificationTopic
+
+  #
+  # Roles
+  #
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectIdentifier}-codepipeline-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub codepipeline.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub codebuild.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  # See https://docs.aws.amazon.com/codepipeline/latest/userguide/how-to-custom-role.html#view-default-service-role-policy
+  CodePipelineCannedPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-CodePipelineCannedPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - iam:PassRole
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - !Sub cloudformation.${AWS::URLSuffix}
+                  - !Sub elasticbeanstalk.${AWS::URLSuffix}
+                  - !Sub ec2.${AWS::URLSuffix}
+                  - !Sub ecs-tasks.${AWS::URLSuffix}
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - codecommit:CancelUploadArchive
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - codedeploy:CreateDeployment
+              - codedeploy:GetApplication
+              - codedeploy:GetApplicationRevision
+              - codedeploy:GetDeployment
+              - codedeploy:GetDeploymentConfig
+              - codedeploy:RegisterApplicationRevision
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - elasticbeanstalk:*
+              - ec2:*
+              - elasticloadbalancing:*
+              - autoscaling:*
+              - cloudwatch:*
+              - s3:*
+              - sns:*
+              - cloudformation:*
+              - rds:*
+              - sqs:*
+              - ecs:*
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - lambda:InvokeFunction
+              - lambda:ListFunctions
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - opsworks:CreateDeployment
+              - opsworks:DescribeApps
+              - opsworks:DescribeCommands
+              - opsworks:DescribeDeployments
+              - opsworks:DescribeInstances
+              - opsworks:DescribeStacks
+              - opsworks:UpdateApp
+              - opsworks:UpdateStack
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:UpdateStack
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:SetStackPolicy
+              - cloudformation:ValidateTemplate
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - devicefarm:ListProjects
+              - devicefarm:ListDevicePools
+              - devicefarm:GetRun
+              - devicefarm:GetUpload
+              - devicefarm:CreateUpload
+              - devicefarm:ScheduleRun
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - servicecatalog:ListProvisioningArtifacts
+              - servicecatalog:CreateProvisioningArtifact
+              - servicecatalog:DescribeProvisioningArtifact
+              - servicecatalog:DeleteProvisioningArtifact
+              - servicecatalog:UpdateProduct
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - ecr:DescribeImages
+            Effect: Allow
+            Resource: "*"
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+  CodePipelinePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !Sub ${ArtifactBucket.Arn}
+              - !Sub ${ArtifactBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt KMSKey.Arn
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt CloudFormationDeployRole.Arn
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource:
+              - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource:
+              - !Ref NotificationTopic
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+  CodeBuildPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
+          - Action:
+              - ecr:DescribeImages
+              - ecr:BatchCheckLayerAvailability
+              - ecr:CompleteLayerUpload
+              - ecr:GetAuthorizationToken
+              - ecr:InitiateLayerUpload
+              - ecr:PutImage
+              - ecr:UploadLayerPart
+            Effect: Allow
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt KMSKey.Arn
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+            Resource:
+              - !Sub ${ArtifactBucket.Arn}
+              - !Sub ${ArtifactBucket.Arn}/*
+      Roles:
+        - !Ref CodeBuildServiceRole
+
+  CloudFormationDeployRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - !Sub cloudformation.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      PermissionsBoundary: !If [ PermissionsBoundaryCondition, !Ref PermissionsBoundary, !Ref "AWS::NoValue" ]
+
+Outputs:
+  StackName:
+    Description: Name of the current stack
+    Value: !Ref AWS::StackName
+
+  KmsKeyId:
+    Description: KMS Key ID
+    Value: !Ref KMSKey
+    Export:
+      Name: !Sub ${AWS::StackName}:KmsKeyId
+
+  KmsKeyArn:
+    Description: KMS Key ARN
+    Value: !GetAtt KMSKey.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:KmsKeyArn
+
+  KeyAlias:
+    Description: Key Alias
+    Value: !Ref KMSAlias
+    Export:
+      Name: !Sub ${AWS::StackName}:KeyAlias
+
+  ArtifactBucket:
+    Description: Artifact bucket name
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:ArtifactBucket
+
+  ArtifactBucketArn:
+    Description: Artifact bucket arn
+    Value: !GetAtt ArtifactBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:ArtifactBucketArn
+
+  CodePipelineRoleArn:
+    Description: CodePipeline role ARN
+    Value: !GetAtt CodePipelineServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CodePipelineRoleArn
+
+  CodeBuildRoleArn:
+    Description: CodeBuild role ARN
+    Value: !GetAtt CodeBuildServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CodeBuildRoleArn
+
+  CloudFormationDeployRoleArn:
+    Description: CloudFormation Stack role ARN
+    Value: !GetAtt CloudFormationDeployRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CloudFormationDeployRoleArn
+
+  NotificationTopicArn:
+    Description: Pipeline notification topic ARN
+    Value: !Ref NotificationTopic
+    Export:
+      Name: !Sub ${AWS::StackName}:NotificationTopicArn
