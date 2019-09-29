@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Shared common lambda layers
+
+Parameters:
+  OrganizationId:
+    Description: >
+      Grant permission to all accounts in the specified organization, leave
+      blank disables cross-organization share.
+    Type: String
+    Default: ''
+
+#  LambdaLayerName:
+#    Description: >
+#      Name of the lambda layer.
+#    Type: String
+#    Default: circuit-common-layer-py37
+
+Conditions:
+
+  CrossOrgPermissionCondition:
+    !Not [!Equals [!Ref OrganizationId, '']]
+
+Resources:
+
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+#      LayerName: !Ref LambdaLayerName
+      ContentUri: common-layer/build/layer.zip
+      CompatibleRuntimes:
+        - python3.7
+      RetentionPolicy: Retain
+      "Fn::Transform":
+        Name: "AWS::Include"
+        Parameters:
+          Location: common-layer/build/tepmlate-fragment.yaml
+
+  CommonLayerPermission:
+    Type: AWS::Lambda::LayerVersionPermission
+    Condition: CrossOrgPermissionCondition
+    DeletionPolicy: Retain
+    Properties:
+      Action: lambda:GetLayerVersion
+      LayerVersionArn: !Ref CommonLayer
+      OrganizationId: !Ref OrganizationId
+      Principal: '*'
+
+Outputs:
+  StackName:
+    Description: Name of the current stack
+    Value: !Ref AWS::StackName
+
+  CommonLayerArn:
+    Description: Common layer ARN for Python runtime
+    Value: !Ref CommonLayer
+    Export:
+      Name: !Sub ${AWS::StackName}:Py37CommonLayerArn
+
+  # How name & version is extracted:
+  #
+  # arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:{name}:{version}
+  #  0   1     2          3                4           5    6       7
+
+  CommonLayerName:
+    Description: Common shared layer name for Python runtime
+    Value:
+      "Fn::Select": [ 6, { "Fn::Split": [ ':', Ref: CommonLayer ] } ]
+
+  CommonLayerVersion:
+    Description: Common shared layer version for Python runtime
+    Value:
+      "Fn::Select": [ 7, { "Fn::Split": [ ':', Ref: CommonLayer ] } ]
