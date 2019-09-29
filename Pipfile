@@ -1,0 +1,30 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+pytest = ">=5.1.0"
+pytest-cov = ">=2.7.0"
+pytest-mock = ">=1.10.0"
+pytest-dotenv = ">=0.4.0"
+pylint = ">=2.4.0"
+coverage = ">=4.5.4"
+bandit = ">=1.6.2"
+aws-sam-cli = ">=0.22.0"
+awscfncli2 = ">=2.1.17"
+#black = "*"
+
+[packages]
+boto3 = ">=1.9.0"
+aws_xray_sdk = ">=2.4.2"
+#requests = ">=2.22.0"
+
+# for packaging test
+#flask = "*"
+
+[requires]
+python_version = "3.7"
+
+#[pipenv]
+#allow_prereleases = true
