@@ -40,15 +40,15 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Tools Account Configuration
+          default: Account Configuration
         Parameters:
           - ToolsAccount
-          - ArtifactBucket
-          - KmsKeyArn
       - Label:
           default: Project Configuration
         Parameters:
           - ProjectIdentifier
+          - ArtifactBucket
+          - KmsKeyArn
       - Label:
           default: Misc
         Parameters:

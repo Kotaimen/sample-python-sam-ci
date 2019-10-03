@@ -79,7 +79,7 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Pipeline Configuration
+          default: Account Configuration
         Parameters:
           - DevAccount
           - TestAccount
@@ -124,6 +124,7 @@ Conditions:
   PermissionsBoundaryCondition: !Not [!Equals [!Ref PermissionsBoundary, ""]]
 
 Resources:
+
   #
   # Encryption
   #
@@ -180,7 +181,10 @@ Resources:
       AliasName: !Sub alias/${ProjectIdentifier}-pipeline-master
       TargetKeyId: !Ref KMSKey
 
-  ArtifactBucket:
+  #
+  # Source bundle bucket
+  #
+  SourceBucket:
     Type: AWS::S3::Bucket
     Properties:
       VersioningConfiguration:
@@ -190,14 +194,51 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      LifecycleConfiguration:
-        Rules:
-          - Status: Enabled
-            Prefix: codebuild-cache/
-            NoncurrentVersionExpirationInDays: 1
-          - Status: Enabled
-            Prefix: input-artifacts/
-            NoncurrentVersionExpirationInDays: 30
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSAlias
+
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AWSCloudTrailAclCheck·
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${CloudTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  #
+  # Pipeline artifact and build cache
+  #
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -219,7 +260,7 @@ Resources:
             Condition:
               StringEquals:
                 "s3:x-amz-server-side-encryption": AES256
-          - Sid: RequiredKMS
+          - Sid: RequiresKMS
             Effect: Deny
             Principal: "*"
             Action: s3:PutObject
@@ -417,13 +458,18 @@ Resources:
           - Effect: Allow
             Action:
               - s3:PutObject
-              - s3:GetBucketPolicy
               - s3:GetObject
               - s3:GetObjectVersion
+            Resource:
+              - !Sub ${ArtifactBucket.Arn}/*
+              - !Sub ${SourceBucket.Arn}/* 
+          - Effect: Allow
+            Action:
+              - s3:GetBucketPolicy
               - s3:ListBucket
             Resource:
               - !Sub ${ArtifactBucket.Arn}
-              - !Sub ${ArtifactBucket.Arn}/*
+              - !Sub ${SourceBucket.Arn}
           - Effect: Allow
             Action:
               - kms:Decrypt
@@ -509,6 +555,12 @@ Outputs:
     Description: Name of the current stack
     Value: !Ref AWS::StackName
 
+  ProjectIdentifier:
+    Description: Project Identifier
+    Value: !Ref ProjectIdentifier
+    Export:
+      Name: !Sub ${AWS::StackName}:ProjectIdentifier
+
   KmsKeyId:
     Description: KMS Key ID
     Value: !Ref KMSKey
@@ -526,6 +578,30 @@ Outputs:
     Value: !Ref KMSAlias
     Export:
       Name: !Sub ${AWS::StackName}:KeyAlias
+
+  SourceBucket:
+    Description: Source bucket name
+    Value: !Ref SourceBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:SourceBucket
+      
+  SourceBucketArn:
+    Description: Source bucket arn
+    Value: !GetAtt SourceBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:SourceBucketArn
+
+  CloudTrailBucket:
+    Description: CloudTrail bucket name
+    Value: !Ref CloudTrailBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:CloudTrailBucket
+      
+  CloudTrailBucketArn:
+    Description: CloudTrail bucket arn
+    Value: !GetAtt CloudTrailBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CloudTrailBucketArn
 
   ArtifactBucket:
     Description: Artifact bucket name
@@ -557,8 +633,15 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}:CloudFormationDeployRoleArn
 
+  NotificationTopic:
+    Description: Pipeline notification topic name
+    Value: !GetAtt NotificationTopic.TopicName
+    Export:
+      Name: !Sub ${AWS::StackName}:NotificationTopic
+
   NotificationTopicArn:
     Description: Pipeline notification topic ARN
     Value: !Ref NotificationTopic
     Export:
       Name: !Sub ${AWS::StackName}:NotificationTopicArn
+
