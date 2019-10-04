@@ -1,0 +1,8 @@
+templates:
+- ci-base/**/*.template.yaml
+- ci-pipelines/**/*.template.yaml
+- infra/**/template.yaml
+include_checks:
+- I
+ignore_checks:
+- W8001

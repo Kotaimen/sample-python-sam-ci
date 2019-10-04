@@ -47,6 +47,12 @@ requirements-dev.txt: Pipfile.lock
 layers: env
 	@$(MAKE) -C infra/lambda-layers build
 
+#
+# Lint
+#
+cfn-lint:
+	cfn-lint --format parseable
+
 define HELP_MESSAGE
 
 todo...

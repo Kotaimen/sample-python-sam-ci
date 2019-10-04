@@ -128,4 +128,5 @@ dmypy.json
 
 ## Local
 .idea
-.aws-sam
+.aws-sam/*
+source.zip
