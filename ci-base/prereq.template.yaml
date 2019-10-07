@@ -98,8 +98,8 @@ Metadata:
         default: Development Account
       TestAccount:
         default: Testing Account
-      DevelopEnvironment:
-        default: Development Account
+      StagingAccount:
+        default: Staging Account
       ProductionAccount:
         default: Production Account
       ProjectIdentifier:
@@ -244,6 +244,11 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
               KMSMasterKeyID: !Ref KMSAlias
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            Prefix: codebuild-cache/
+            ExpirationInDays: 7
 
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
