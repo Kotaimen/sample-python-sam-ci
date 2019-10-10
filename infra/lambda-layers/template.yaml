@@ -12,11 +12,11 @@ Parameters:
     Type: String
     Default: ''
 
-#  LambdaLayerName:
-#    Description: >
-#      Name of the lambda layer.
-#    Type: String
-#    Default: circuit-common-layer-py37
+  CommonLayerName:
+    Description: >
+      Common lambda layer name.
+    Type: String
+    Default: circuit-common-layer-py37
 
 Conditions:
 
@@ -28,15 +28,15 @@ Resources:
   CommonLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-#      LayerName: !Ref LambdaLayerName
-      ContentUri: common-layer/build/layer.zip
+      LayerName: !Ref CommonLayerName
+      ContentUri: build/common-layer.zip
       CompatibleRuntimes:
         - python3.7
       RetentionPolicy: Retain
       "Fn::Transform":
         Name: "AWS::Include"
         Parameters:
-          Location: common-layer/build/tepmlate-fragment.yaml
+          Location: build/common-layer.yaml
 
   CommonLayerPermission:
     Type: AWS::Lambda::LayerVersionPermission

@@ -1,0 +1,570 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Build python lambda layers and deploy to each stages.
+
+Parameters:
+
+  PreReqStack:
+    Description: >
+      Name of pre-requests stack, this is in same account&region of the
+      pipeline stack.
+    Type: String
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: "[a-zA-Z0-9-]+"
+    ConstraintDescription: >
+      Stack name must start with an alphabetic character and can't be longer
+      than 128 characters
+
+  SourceBucket:
+    Type: String
+    Description: >
+      S3 bucket for input source artifact, the pipeline will default to Source bucket in PrePreq stack
+      if this is left empty.
+    Default: ""
+
+  SourcePrefix:
+    Type: String
+    Description: >
+      S3 prefix of input source artifact in the source bucket.
+    MinLength: 1
+    MaxLength: 256
+
+  DevAccount:
+    Description: >
+      AWS AccountNumber for development stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  TestAccount:
+    Description: >
+      AWS AccountNumber for testing stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  StagingAccount:
+    Description: >
+      AWS AccountNumber for staging stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  ProductionAccount:
+    Description: >
+      AWS AccountNumber for production stages.
+      Setting this to same account to the pipeline account disables cross account
+      deployment automatically.  Setting to empty string disables the stage
+      entirely.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 12
+    AllowedPattern: "[0-9]*"
+    ConstraintDescription: Must be numberic string or empty.
+
+  StageTransitionConfirm:
+    Description: >
+      Require manual confirm on stage transitions
+    Type: String
+    Default: "no"
+    AllowedValues: ["yes", "no"]
+
+  StackNames:
+    Description: >
+      Name of the lambda layer stack in each stages, separated by ",", unused stages can be ignored.
+      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
+    Type: CommaDelimitedList
+
+  LayerNames:
+    Description: >
+      Name of the lambda layer in each stages, separated by ",", unused stages can be ignored.
+      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
+    Type: CommaDelimitedList
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Account Configuration
+        Parameters:
+          - DevAccount
+          - TestAccount
+          - StagingAccount
+          - ProductionAccount
+      - Label:
+          default: Project Configuration
+        Parameters:
+          - PreReqStack
+          - SourceBucket
+          - SourcePrefix
+          - StageTransitionConfirm
+      - Label:
+          default: Stack Configuration
+        Parameters:
+          - StackNames
+          - LayerNames
+    ParameterLabels:
+      DevAccount:
+        default: Development Account
+      TestAccount:
+        default: Testing Account
+      StagingAccount:
+        default: Staging Account
+      ProductionAccount:
+        default: Production Account
+      StageTransitionConfirm:
+        default: Stage Transition Confirm
+      PreReqStack:
+        default: PreRequests Stack
+      SourceBucket:
+        default: Source Bucket
+      SourcePrefix:
+        default: Source Prefix
+      StackNames:
+        default: Stack Names
+      LayerNames:
+        default: Layer Names
+
+
+Conditions:
+  # Detect "same account" situation
+  DevCrossAccountCondition: !Not [!Equals [!Ref DevAccount, !Ref "AWS::AccountId"]]
+  TestCrossAccountCondition: !Not [!Equals [!Ref TestAccount, !Ref "AWS::AccountId"]]
+  StagingCrossAccountCondition: !Not [!Equals [!Ref StagingAccount, !Ref "AWS::AccountId"]]
+  ProductionCrossAccountCondition: !Not [!Equals [!Ref ProductionAccount, !Ref "AWS::AccountId"]]
+
+  # Stages to enable
+  EnableDevStageCondition: !Not [!Equals [!Ref DevAccount, ""]]
+  EnableTestStageCondition: !Not [!Equals [!Ref TestAccount, ""]]
+  EnableStagingStageCondition: !Not [!Equals [!Ref StagingAccount, ""]]
+  EnableProductionStageCondition: !Not [!Equals [!Ref ProductionAccount, ""]]
+
+  #Misc
+  UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
+  StageTransitionConfirmConditon: !Equals [!Ref StageTransitionConfirm, "yes"]
+
+Resources:
+
+  LambdaLayerProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Build Lambda Layers
+      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
+      TimeoutInMinutes: 30
+      EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: WORKDIR
+            Value: infra/lambda-layers/
+          - Name: TEMPLATE_BUCKET
+            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+          - Name: TEMPLATE_PREFIX
+            Value: codebuild-packaged-templates
+          - Name: KMS_KEY_ARN
+            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      Cache:
+        Type: S3
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_DOCKER_LAYER_CACHE
+        Location: !Join ["/", [{ "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }, "codebuild-cache"]]
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            variables:
+              PIPENV_NOSPIN: enabled
+              SAM_CLI_TELEMETRY: 0
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+                docker: 18
+              commands:
+                - echo Entered the install phase...
+                - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 --storage-driver=overlay&
+                - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+                - docker pull lambci/lambda:build-python3.7
+                - pip3 install -r requirements-dev.txt
+              finally:
+                - echo Leaving install phase...
+            pre_build:
+              commands:
+                - echo Entered the pre_build phase...
+                - cd ${WORKDIR}
+              finally:
+                - echo Leaving pre_build phrase..
+            build:
+              commands:
+                - echo Entered the build phase...
+                - make package
+              finally:
+                - echo Leaving build phase...
+            post_build:
+              commands:
+                - echo Entered the post_build phase...
+              finally:
+                - echo Leaving post_build phase...
+          cache:
+            paths:
+              - '/root/.cache/pip/**/*'
+          artifacts:
+            files:
+              - 'infra/lambda-layers/build/packaged.yaml'
+              - 'infra/lambda-layers/*'
+            base-directory: .
+            discard-paths: yes
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineRoleArn" }
+      ArtifactStore:
+        Type: S3
+        Location: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+        EncryptionKey:
+          Type: KMS
+          Id: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      RestartExecutionOnUpdate: false
+      Stages:
+
+        - Name: Source
+          Actions:
+            - Name: S3Source
+              RunOrder: 1
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              Configuration:
+                S3Bucket: !If
+                  - UseDefaultSourceBucketConditon
+                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
+                  - !Ref SourceBucket
+                S3ObjectKey: !Ref SourcePrefix
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceArtifact
+
+        - Name: Build
+          Actions:
+            - Name: BuildLambdaLayer
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref LambdaLayerProject
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: LambdaLayerArtifact
+
+        - Fn::If:
+          - EnableDevStageCondition
+          - Name: DeployToDevelop
+            Actions:
+              - Name: Deploy
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                RoleArn: !If
+                  - DevCrossAccountCondition
+                  - !Sub
+                    - arn:aws:iam::${DevAccount}:role/${ProjectName}-CrossAccountRole
+                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                  - !Ref AWS::NoValue
+                InputArtifacts:
+                  - Name: LambdaLayerArtifact
+                OutputArtifacts:
+                  - Name: DevStackOutput
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  RoleArn: !If
+                    - DevCrossAccountCondition
+                    - !Sub
+                      - arn:aws:iam::${DevAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  StackName: !Select [0, !Ref StackNames]
+                  TemplatePath: LambdaLayerArtifact::packaged.yaml
+                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  ParameterOverrides: !Sub
+                    - >
+                      {
+                        "CommonLayerName": "${CommonLayerName}"
+                      }
+                    - CommonLayerName: !Select [0, !Ref LayerNames]
+                  OutputFileName: stack-output.json
+              - Fn::If:
+                - StageTransitionConfirmConditon
+                - Name: Review
+                  RunOrder: 2
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Version: "1"
+                    Provider: Manual
+                  Configuration:
+                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
+                    CustomData: Review Development Stage
+                - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
+
+        - Fn::If:
+          - EnableTestStageCondition
+          - Name: DeployToTest
+            Actions:
+              - Name: DeployToTest
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                RoleArn: !If
+                  - TestCrossAccountCondition
+                  - !Sub
+                    - arn:aws:iam::${TestAccount}:role/${ProjectName}-CrossAccountRole
+                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                  - !Ref AWS::NoValue
+                InputArtifacts:
+                  - Name: LambdaLayerArtifact
+                OutputArtifacts:
+                  - Name: TestStackOutput
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  RoleArn: !If
+                    - TestCrossAccountCondition
+                    - !Sub
+                      - arn:aws:iam::${TestAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  StackName: !Select [1, !Ref StackNames]
+                  TemplatePath: LambdaLayerArtifact::packaged.yaml
+                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  ParameterOverrides: !Sub
+                    - >
+                      {
+                        "CommonLayerName": "${CommonLayerName}"
+                      }
+                    - CommonLayerName: !Select [1, !Ref LayerNames]
+                  OutputFileName: stack-output.json
+              - Fn::If:
+                - StageTransitionConfirmConditon
+                - Name: Review
+                  RunOrder: 2
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Version: "1"
+                    Provider: Manual
+                  Configuration:
+                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
+                    CustomData: Review Testing Stage
+                - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
+
+        - Fn::If:
+          - EnableStagingStageCondition
+          - Name: DeployToStaging
+            Actions:
+              - Name: Deploy
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                RoleArn: !If
+                  - StagingCrossAccountCondition
+                  - !Sub
+                    - arn:aws:iam::${StagingAccount}:role/${ProjectName}-CrossAccountRole
+                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                  - !Ref AWS::NoValue
+                InputArtifacts:
+                  - Name: LambdaLayerArtifact
+                OutputArtifacts:
+                  - Name: StagingStackOutput
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  RoleArn: !If
+                    - StagingCrossAccountCondition
+                    - !Sub
+                      - arn:aws:iam::${StagingAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  StackName: !Select [2, !Ref StackNames]
+                  TemplatePath: LambdaLayerArtifact::packaged.yaml
+                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  ParameterOverrides: !Sub
+                    - >
+                      { "CommonLayerName": "${CommonLayerName}" }
+                    - CommonLayerName: !Select [2, !Ref LayerNames]
+                  OutputFileName: stack-output.json
+              - Fn::If:
+                - StageTransitionConfirmConditon
+                - Name: Review
+                  RunOrder: 2
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Version: "1"
+                    Provider: Manual
+                  Configuration:
+                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
+                    CustomData: Review Staging
+                - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
+
+        - Fn::If:
+          - EnableProductionStageCondition
+          - Name: DeployToProduction
+            Actions:
+              - Name: DeployToProductionment
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                RoleArn: !If
+                  - ProductionCrossAccountCondition
+                  - !Sub
+                    - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CrossAccountRole
+                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                  - !Ref AWS::NoValue
+                InputArtifacts:
+                  - Name: LambdaLayerArtifact
+                OutputArtifacts:
+                  - Name: ProdStackOutput
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  RoleArn: !If
+                    - ProductionCrossAccountCondition
+                    - !Sub
+                      - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  StackName: !Select [3, !Ref StackNames]
+                  TemplatePath: LambdaLayerArtifact::packaged.yaml
+                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  ParameterOverrides: !Sub
+                    - >
+                      { "CommonLayerName": "${CommonLayerName}" }
+                    - CommonLayerName: !Select [3, !Ref LayerNames]
+                  OutputFileName: stack-output.json
+          - !Ref AWS::NoValue
+
+  #
+  # S3 Pipeline Trigger
+  #
+  S3CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      IsLogging: true
+      S3BucketName: { "Fn::ImportValue": !Sub "${PreReqStack}:CloudTrailBucket" }
+      EventSelectors:
+        - ReadWriteType: WriteOnly
+          IncludeManagementEvents: false
+          DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub
+                  - "arn:aws:s3:::${BUCKET_NAME}/${PREFIX}"
+                  - BUCKET_NAME: !If
+                      - UseDefaultSourceBucketConditon
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
+                      - !Ref SourceBucket
+                    PREFIX: !Ref SourcePrefix
+
+  S3ObjectCreatedEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "S3.PutObject for CodePipeline source file"
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.s3
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - PutObject
+          requestParameters:
+            bucketName:
+              - !If
+                - UseDefaultSourceBucketConditon
+                - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
+                - !Ref SourceBucket
+            key:
+              - !Ref SourcePrefix
+      Targets:
+        -
+          Id: "TargetCodePipeline"
+          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+          RoleArn: !GetAtt EventsCallPipelineRole.Arn
+
+  EventsCallPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: events.amazonaws.com
+        Version: "2012-10-17"
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineExecution
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+
+Outputs:
+
+  Pipeline:
+    Description: CodePipeline Name
+    Value: !Ref Pipeline
