@@ -487,10 +487,10 @@ Resources:
             Action:
               - sts:AssumeRole
             Resource:
-              - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:role/${ProjectIdentifier}-CloudFormationRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
           - Effect: Allow
             Action:
               - sns:Publish
