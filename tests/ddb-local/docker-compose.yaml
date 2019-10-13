@@ -1,0 +1,9 @@
+version: '2.4'
+
+services:
+  ddb:
+    image: amazon/dynamodb-local
+    entrypoint: [ java, -jar, DynamoDBLocal.jar, -inMemory, -sharedDb ]
+    working_dir: /home/dynamodblocal
+    ports:
+      - "8000:8000"
