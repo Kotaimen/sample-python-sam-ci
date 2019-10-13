@@ -129,4 +129,5 @@ dmypy.json
 ## Local
 .idea
 .aws-sam/*
+cfn-cli.dev.yaml
 source.zip
