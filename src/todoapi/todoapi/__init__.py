@@ -15,6 +15,6 @@ def create_app(test_config=None):
         app.config.update(test_config)
 
     app.wsgi_app = ProxyFix(app.wsgi_app)
-    app.register_blueprint(blueprint, url_prefix="/api/v1")
+    app.register_blueprint(blueprint, url_prefix="/v1")
 
     return app

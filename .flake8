@@ -1,0 +1,14 @@
+[flake8]
+max-complexity = 10
+max-line-length = 88
+exclude =
+    .git,
+    __pycache__,
+    .aws-sam
+select = C,E,F,W,B,B950
+ignore =
+    E501,
+    W503,
+    E203
+    D100, D104, ; missing docstring
+    F401, ; unused import

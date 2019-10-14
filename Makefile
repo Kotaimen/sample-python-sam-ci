@@ -14,6 +14,7 @@ clean:
 	@echo Cleaning...
 	@$(MAKE) -C infra/lambda-layers clean
 	@$(PIPENV) clean
+	@$(MAKE) -C services clean
 
 
 
@@ -47,11 +48,24 @@ requirements-dev.txt: Pipfile.lock
 layers: env
 	@$(MAKE) -C infra/lambda-layers build
 
+build:
+	@$(MAKE) -C services build
+
 #
-# Lint
+# Code quality
 #
+test:
+	pytest --cov=src
+
+lint:
+	flake8 --config=.flake8
+	bandit -r src
+
 cfn-lint:
 	cfn-lint --format parseable
+
+format:
+	black ./src ./tests/unit
 
 define HELP_MESSAGE
 

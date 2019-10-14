@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+  A Simple TODO Api
+
+Parameters:
+
+  LogLevel:
+    Type: String
+    Description: Log level
+    Default: DEBUG
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+
+  CommonLayerArn:
+    Description: >
+      Arn of common lambda layer.
+    Type: String
+    Default: 'arn:aws:lambda:us-east-1:1234567890:layer:layer-name:4'
+
+Globals:
+  Function:
+    Runtime: python3.7
+    MemorySize: 256
+    Timeout: 30
+    Tracing: Active
+    AutoPublishAlias: live
+#    DeploymentPreference:
+#      Type: AllAtOnce
+
+Resources:
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      StageName: prod
+      TracingEnabled: true
+      EndpointConfiguration: REGIONAL
+
+  FlaskBackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: main.lambda_handler
+      CodeUri: lambdas/flask-backend/
+      Layers:
+        - !Ref CommonLayerArn
+      Description: Flask lambda function
+      Environment:
+        Variables:
+          DDB_TODO_TABLE:
+            Ref: Table
+          DDB_ENDPOINT_URL: ''
+          LOG_LEVEL: !Ref LogLevel
+      Policies:
+        - AWSXRayDaemonWriteAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Table
+#        - Version: "2012-10-17"
+#          Statement:
+#            - Effect: Allow
+#              Action: DynamoDB:DescribeTable
+#              Resource: !GetAtt Table.Arn
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /{proxy+}
+            Method: ANY
+
+  Table:
+    Type: AWS::Serverless::SimpleTable
+    DeletionPolicy: Delete
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
