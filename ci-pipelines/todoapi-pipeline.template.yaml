@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Build python lambda layers and deploy to each stages.
+  Build, test and deploy SAM template.
 
 Parameters:
 
@@ -89,6 +89,13 @@ Parameters:
     Default: "no"
     AllowedValues: ["yes", "no"]
 
+  StackUpdateActionMode:
+    Description: >
+      Stack deployment action mode for non-production stages.
+    Type: String
+    Default: CREATE_UPDATE
+    AllowedValues: [REPLACE_ON_FAILURE, CREATE_UPDATE]
+
   StackNames:
     Description: >
       Name of the lambda layer stack in each stages, separated by ",", unused stages can be ignored.
@@ -96,12 +103,19 @@ Parameters:
     Type: CommaDelimitedList
     Default: stack-name
 
-  LayerNames:
+  LambdaLayerNames:
     Description: >
       Name of the lambda layer in each stages, separated by ",", unused stages can be ignored.
       Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
     Type: CommaDelimitedList
     Default: layer-name
+
+  LambdaLayerVersions:
+    Description: >
+      Version of the lambda layer in each stages, separated by ",", unused stages can be ignored.
+      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
+    Type: CommaDelimitedList
+    Default: "1"
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -120,11 +134,13 @@ Metadata:
           - SourceBucket
           - SourcePrefix
           - StageTransitionConfirm
+          - StackUpdateActionMode
       - Label:
           default: Stack Configuration
         Parameters:
           - StackNames
-          - LayerNames
+          - LambdaLayerNames
+          - LambdaLayerVersions
     ParameterLabels:
       DevAccount:
         default: Development Account
@@ -136,6 +152,8 @@ Metadata:
         default: Production Account
       StageTransitionConfirm:
         default: Stage Transition Confirm
+      StackUpdateActionMode:
+        default: Stack Update Action Mode
       PreReqStack:
         default: PreRequests Stack
       SourceBucket:
@@ -144,8 +162,10 @@ Metadata:
         default: Source Prefix
       StackNames:
         default: Stack Names
-      LayerNames:
-        default: Layer Names
+      LambdaLayerNames:
+        default: Lambda Layer Names
+      LambdaLayerVersions:
+        default: Lambda Layer Versions
 
 
 Conditions:
@@ -165,12 +185,33 @@ Conditions:
   UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
   StageTransitionConfirmConditon: !Equals [!Ref StageTransitionConfirm, "yes"]
 
+Mappings:
+
+  StackConfig:
+    # Full stack name is "<ProjectName>-<StackName><DeploymentId>"
+    Develop:
+      Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-dev.json
+    Test:
+      Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-test.json
+    Staging:
+      Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-staging.json
+    Production:
+      Capabilities: CAPABILITY_IAM
+      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-prod.json
+
 Resources:
 
-  LambdaLayerProject:
+  TestProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Description: Build Lambda Layers
+      Description: Run unittests
       ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
       TimeoutInMinutes: 30
       EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
@@ -183,18 +224,12 @@ Resources:
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: WORKDIR
-            Value: infra/lambda-layers/
-          - Name: TEMPLATE_BUCKET
-            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-          - Name: TEMPLATE_PREFIX
-            Value: codebuild-packaged-templates
-          - Name: KMS_KEY_ARN
-            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+            Value: .
       Cache:
         Type: S3
         Modes:
           - LOCAL_CUSTOM_CACHE
-          - LOCAL_DOCKER_LAYER_CACHE
+          - LOCAL_DOCKER_CSAC
         Location: !Join ["/", [{ "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }, "codebuild-cache"]]
       Source:
         Type: CODEPIPELINE
@@ -212,7 +247,130 @@ Resources:
                 - echo Entered the install phase...
                 - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 --storage-driver=overlay&
                 - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
-                - docker pull lambci/lambda:build-python3.7
+                - docker pull amazon/dynamodb-local
+                - pip3 install -r requirements-dev.txt -r requirements.txt
+              finally:
+                - echo Leaving install phase...
+            pre_build:
+              commands:
+                - echo Entered the pre_build phase...
+                - docker run -d -p 8000:8000 amazon/dynamodb-local
+                - cd ${WORKDIR}
+              finally:
+                - echo Leaving pre_build phrase..
+            build:
+              commands:
+                - echo Entered the build phase...
+                - make test
+                - make coverage
+              finally:
+                - echo Leaving build phase...
+            post_build:
+              commands:
+                - echo Entered the post_build phase...
+              finally:
+                - echo Leaving post_build phase...
+          cache:
+            paths:
+              - '/root/.cache/pip/**/*'
+
+  LintProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Run code quality tools
+      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
+      TimeoutInMinutes: 30
+      EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: WORKDIR
+            Value: .
+      Cache:
+        Type: S3
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+        Location: !Join ["/", [{ "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }, "codebuild-cache"]]
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            variables:
+              SAM_CLI_TELEMETRY: 0
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo Entered the install phase...
+                - pip3 install -r requirements-dev.txt
+              finally:
+                - echo Leaving install phase...
+            pre_build:
+              commands:
+                - echo Entered the pre_build phase...
+                - cd ${WORKDIR}
+              finally:
+                - echo Leaving pre_build phrase..
+            build:
+              commands:
+                - echo Entered the build phase...
+                - make lint
+              finally:
+                - echo Leaving build phase...
+            post_build:
+              commands:
+                - echo Entered the post_build phase...
+              finally:
+                - echo Leaving post_build phase...
+          cache:
+            paths:
+              - '/root/.cache/pip/**/*'
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Build and package SAM projects
+      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
+      TimeoutInMinutes: 30
+      EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: WORKDIR
+            Value: .
+          - Name: TEMPLATE_BUCKET
+            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+          - Name: TEMPLATE_PREFIX
+            Value: codebuild-packaged-templates
+          - Name: KMS_KEY_ARN
+            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      Cache:
+        Type: S3
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+        Location: !Join ["/", [{ "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }, "codebuild-cache"]]
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo Entered the install phase...
                 - pip3 install -r requirements-dev.txt
               finally:
                 - echo Leaving install phase...
@@ -237,11 +395,8 @@ Resources:
             paths:
               - '/root/.cache/pip/**/*'
           artifacts:
-            files:
-              - 'infra/lambda-layers/build/packaged.yaml'
-              - 'infra/lambda-layers/*'
-            base-directory: .
-            discard-paths: yes
+            files: '**/*'
+            discard-paths: no
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -275,9 +430,9 @@ Resources:
               OutputArtifacts:
                 - Name: SourceArtifact
 
-        - Name: Build
+        - Name: Test
           Actions:
-            - Name: BuildLambdaLayer
+            - Name: Test
               RunOrder: 1
               ActionTypeId:
                 Category: Build
@@ -285,17 +440,42 @@ Resources:
                 Version: "1"
                 Provider: CodeBuild
               Configuration:
-                ProjectName: !Ref LambdaLayerProject
+                ProjectName: !Ref TestProject
+              InputArtifacts:
+                - Name: SourceArtifact
+            - Name: Lint
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref LintProject
+              InputArtifacts:
+                - Name: SourceArtifact
+
+        - Name: Build
+          Actions:
+            - Name: BuildAndPackage
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref BuildProject
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
-                - Name: LambdaLayerArtifact
+                - Name: PackagedArtifact
 
         - Fn::If:
           - EnableDevStageCondition
           - Name: DeployToDevelop
             Actions:
-              - Name: Deploy
+              - Name: DeployTodoApi
                 RunOrder: 1
                 ActionTypeId:
                   Category: Deploy
@@ -309,27 +489,28 @@ Resources:
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
-                  - Name: LambdaLayerArtifact
+                  - Name: PackagedArtifact
                 OutputArtifacts:
-                  - Name: DevStackOutput
+                  - Name: TodoApiDevStackOutput
                 Configuration:
-                  ActionMode: CREATE_UPDATE
+                  ActionMode: !Ref StackUpdateActionMode
                   RoleArn: !If
                     - DevCrossAccountCondition
                     - !Sub
                       - arn:aws:iam::${DevAccount}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  Capabilities: !FindInMap [StackConfig, Develop, Capabilities]
                   StackName: !Select [0, !Ref StackNames]
-                  TemplatePath: LambdaLayerArtifact::packaged.yaml
-                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  TemplatePath: !FindInMap [StackConfig, Develop, TemplatePath]
+                  TemplateConfiguration: !FindInMap [StackConfig, Develop, TemplateConfiguration]
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerName": "${CommonLayerName}"
+                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${DevAccount}:layer:${NAME}:${VERSION}"
                       }
-                    - CommonLayerName: !Select [0, !Ref LayerNames]
+                    - NAME: !Select [0, !Ref LambdaLayerNames]
+                      VERSION: !Select [0, !Ref LambdaLayerVersions]
                   OutputFileName: stack-output.json
               - Fn::If:
                 - StageTransitionConfirmConditon
@@ -350,7 +531,7 @@ Resources:
           - EnableTestStageCondition
           - Name: DeployToTest
             Actions:
-              - Name: Deploy
+              - Name: DeployTodoApi
                 RunOrder: 1
                 ActionTypeId:
                   Category: Deploy
@@ -364,27 +545,28 @@ Resources:
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
-                  - Name: LambdaLayerArtifact
+                  - Name: PackagedArtifact
                 OutputArtifacts:
-                  - Name: TestStackOutput
+                  - Name: TodoApiTestStackOutput
                 Configuration:
-                  ActionMode: CREATE_UPDATE
+                  ActionMode: !Ref StackUpdateActionMode
                   RoleArn: !If
                     - TestCrossAccountCondition
                     - !Sub
                       - arn:aws:iam::${TestAccount}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  Capabilities: !FindInMap [StackConfig, Test, Capabilities]
                   StackName: !Select [1, !Ref StackNames]
-                  TemplatePath: LambdaLayerArtifact::packaged.yaml
-                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  TemplatePath: !FindInMap [StackConfig, Test, TemplatePath]
+                  TemplateConfiguration: !FindInMap [StackConfig, Test, TemplateConfiguration]
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerName": "${CommonLayerName}"
+                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${TestAccount}:layer:${NAME}:${VERSION}"
                       }
-                    - CommonLayerName: !Select [1, !Ref LayerNames]
+                    - NAME: !Select [1, !Ref LambdaLayerNames]
+                      VERSION: !Select [1, !Ref LambdaLayerVersions]
                   OutputFileName: stack-output.json
               - Fn::If:
                 - StageTransitionConfirmConditon
@@ -405,7 +587,7 @@ Resources:
           - EnableStagingStageCondition
           - Name: DeployToStaging
             Actions:
-              - Name: Deploy
+              - Name: DeployTodoApi
                 RunOrder: 1
                 ActionTypeId:
                   Category: Deploy
@@ -419,25 +601,28 @@ Resources:
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
-                  - Name: LambdaLayerArtifact
+                  - Name: PackagedArtifact
                 OutputArtifacts:
-                  - Name: StagingStackOutput
+                  - Name: TodoApiStagingStackOutput
                 Configuration:
-                  ActionMode: CREATE_UPDATE
+                  ActionMode: !Ref StackUpdateActionMode
                   RoleArn: !If
                     - StagingCrossAccountCondition
                     - !Sub
                       - arn:aws:iam::${StagingAccount}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  Capabilities: !FindInMap [StackConfig, Staging, Capabilities]
                   StackName: !Select [2, !Ref StackNames]
-                  TemplatePath: LambdaLayerArtifact::packaged.yaml
-                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  TemplatePath: !FindInMap [StackConfig, Staging, TemplatePath]
+                  TemplateConfiguration: !FindInMap [StackConfig, Staging, TemplateConfiguration]
                   ParameterOverrides: !Sub
                     - >
-                      { "CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [2, !Ref LayerNames]
+                      {
+                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${StagingAccount}:layer:${NAME}:${VERSION}"
+                      }
+                    - NAME: !Select [2, !Ref LambdaLayerNames]
+                      VERSION: !Select [2, !Ref LambdaLayerVersions]
                   OutputFileName: stack-output.json
               - Fn::If:
                 - StageTransitionConfirmConditon
@@ -458,7 +643,7 @@ Resources:
           - EnableProductionStageCondition
           - Name: DeployToProduction
             Actions:
-              - Name: Deploy
+              - Name: CreateTodoApiChangeSet
                 RunOrder: 1
                 ActionTypeId:
                   Category: Deploy
@@ -472,25 +657,65 @@ Resources:
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
-                  - Name: LambdaLayerArtifact
-                OutputArtifacts:
-                  - Name: ProdStackOutput
+                  - Name: PackagedArtifact
                 Configuration:
-                  ActionMode: CREATE_UPDATE
+                  ChangeSetName: !Sub ${AWS::StackName}-todoapi
+                  ActionMode: CHANGE_SET_REPLACE
                   RoleArn: !If
                     - ProductionCrossAccountCondition
                     - !Sub
                       - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                  Capabilities: !FindInMap [StackConfig, Production, Capabilities]
                   StackName: !Select [3, !Ref StackNames]
-                  TemplatePath: LambdaLayerArtifact::packaged.yaml
-                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
+                  TemplatePath: !FindInMap [StackConfig, Production, TemplatePath]
+                  TemplateConfiguration: !FindInMap [StackConfig, Production, TemplateConfiguration]
                   ParameterOverrides: !Sub
                     - >
-                      { "CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [3, !Ref LayerNames]
+                      {
+                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${ProductionAccount}:layer:${NAME}:${VERSION}"
+                      }
+                    - NAME: !Select [3, !Ref LambdaLayerNames]
+                      VERSION: !Select [3, !Ref LambdaLayerVersions]
+                  OutputFileName: stack-output.json
+
+              - Name: ReviewChangeSet
+                RunOrder: 2
+                ActionTypeId:
+                  Category: Approval
+                  Owner: AWS
+                  Version: "1"
+                  Provider: Manual
+                Configuration:
+                  NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
+                  CustomData: Review ChangeSet
+
+              - Name: ExecuteTodoApiChangeSet
+                RunOrder: 3
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                RoleArn: !If
+                  - ProductionCrossAccountCondition
+                  - !Sub
+                    - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CrossAccountRole
+                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                  - !Ref AWS::NoValue
+                OutputArtifacts:
+                  - Name: TodoApiProductionStackOutput
+                Configuration:
+                  ChangeSetName: !Sub ${AWS::StackName}-todoapi
+                  ActionMode: CHANGE_SET_EXECUTE
+                  RoleArn: !If
+                    - ProductionCrossAccountCondition
+                    - !Sub
+                      - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                  StackName: !Select [3, !Ref StackNames]
                   OutputFileName: stack-output.json
           - !Ref AWS::NoValue
 

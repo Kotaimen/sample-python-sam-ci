@@ -51,10 +51,16 @@ layers: env
 build:
 	@$(MAKE) -C services build
 
+package:
+	@$(MAKE) -C services package
+
 #
 # Code quality
 #
 test:
+	pytest
+
+coverage:
 	pytest --cov=src
 
 lint:

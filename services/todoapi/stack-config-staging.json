@@ -1,0 +1,8 @@
+{
+  "Parameters": {
+    "LogLevel": "INFO"
+  },
+  "Tags": {
+    "Environment": "Staging"
+  }
+}
