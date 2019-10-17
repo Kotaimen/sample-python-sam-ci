@@ -1,0 +1,176 @@
+Version: 3
+
+Blueprints:
+
+  # Tools Account: Where the pipeline infra stays
+  # Dev/Test/Staging Accounts: Where dev/test/stage stacks are deployed,
+  # these can be the same as Tools account
+  # Production Accounts: Where production stack are deployed, this can also
+  # be the same as Tools account but is not recommended.
+
+  #
+  # Replace <Profile> with real profile name for each accounts.
+  #
+
+  Tools:
+    Profile: <awscli-profile-for-tools-account>
+    Region: us-east-1
+    Tags:
+      Environment: Develop
+      Maintainer: someone@company.com
+
+  Test:
+    Profile: <awscli-profile-for-test-account>
+    Region: us-east-1
+    Tags:
+      Environment: Develop
+      Maintainer: someone@company.com
+
+  Staging:
+    Profile: <awscli-profile-for-staging-account>
+    Region: us-east-1
+    Tags:
+      Environment: Develop
+      Maintainer: someone@company.com
+
+  Production:
+    Profile: <awscli-profile-for-prod-account>
+    Region: us-east-1
+    Tags:
+      Environment: Develop
+      Maintainer: someone@company.com
+
+Stages:
+
+  CIBase:
+    Order: 1
+
+    PreReq:
+      Extends: Tools
+      Order: 1
+      StackName: samdemo-prereq
+      Template: ci-base/prereq.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        # ProjectIdentifier must be unique for each pipeline infra setup,
+        # Replace account with real account id, leave them blank disables the stage.
+        ProjectIdentifier: samdemo
+        DevAccount: "<dev-account-id>"
+        TestAccount: ""
+        StagingAccount: ""
+        ProductionAccount: "<prod-account-id>"
+        PermissionsBoundary: ""
+
+    Notification:
+      Order: 2
+      Extends: Tools
+      StackName: samdemo-notification
+      Template: ./ci-base/notification.template.yaml
+      Capabilities: [CAPABILITY_IAM, CAPABILITY_AUTO_EXPAND]
+      Package: true
+      Parameters:
+        PreReqStack: ${CIBase.PreReq.StackName}
+
+    #
+    # Enable the cross account role as needed
+    #
+
+    TestRole:
+      Extends: Test
+      Order: 10
+      StackName: samdemo-xcnt-role
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        # ProjectIdentifier must be same as PreReq stack,
+        # Replace ToolsAccount with tools account ID
+        ProjectIdentifier: samdemo
+        ToolsAccount: "<tools-account-id>"
+        ArtifactBucket: ${CIBase.PreReq.ArtifactBucket}
+        KmsKeyArn: ${CIBase.PreReq.KmsKeyArn}
+        PermissionsBoundary: ""
+
+    StagingRole:
+      Extends: Staging
+      Order: 10
+      StackName: samdemo-xcnt-role
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        # ProjectIdentifier must be same as PreReq stack,
+        # Replace ToolsAccount with tools account ID
+        ProjectIdentifier: samdemo
+        ToolsAccount: "<tools-account-id>"
+        ArtifactBucket: ${CIBase.PreReq.ArtifactBucket}
+        KmsKeyArn: ${CIBase.PreReq.KmsKeyArn}
+        PermissionsBoundary: ""
+
+    ProductionRole:
+      Extends: Production
+      Order: 10
+      StackName: samdemo-xcnt-role
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        # ProjectIdentifier must be same as PreReq stack,
+        # Replace ToolsAccount with tools account ID
+        ProjectIdentifier: samdemo
+        ToolsAccount: "<tools-account-id>"
+        ArtifactBucket: ${CIBase.PreReq.ArtifactBucket}
+        KmsKeyArn: ${CIBase.PreReq.KmsKeyArn}
+        PermissionsBoundary: ""
+
+  Pipelines:
+    Order: 10
+    Layers:
+      Extends: Tools
+      StackName: samdemo-layers-pipeline
+      Template: ci-pipelines/lambda-layer-pipeline.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        PreReqStack: ${CIBase.PreReq.StackName}
+        SourcePrefix: source.zip
+        StageTransitionConfirm: "yes"
+        DevAccount: "<dev-account-id>"
+        TestAccount: ""
+        StagingAccount: ""
+        ProductionAccount: "<prod-account-id>"
+        StackNames: |
+          samdemo-shared-layer-dev,
+          _,
+          _,
+          samdemo-shared-layer-prod
+        LayerNames: |
+          samdemo-common-layer-py37-dev,
+          _,
+          _,
+          samdemo-common-layer-py37-prod
+
+    TodoApi:
+      Extends: Tools
+      StackName: samdemo-todoapi-pipeline
+      Template: ci-pipelines/todoapi-pipeline.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        PreReqStack: ${CIBase.PreReq.StackName}
+        SourcePrefix: source.zip
+        StageTransitionConfirm: "yes"
+        DevAccount: "<dev-account-id>"
+        TestAccount: ""
+        StagingAccount: ""
+        ProductionAccount: "<prod-account-id>"
+        StackNames: |
+          samdemo-todoapi-dev,
+          _,
+          _,
+          samdemo-todoapi-prod
+        LambdaLayerNames: |
+          samdemo-common-layer-py37-dev,
+          _,
+          _,
+          samdemo-common-layer-py37-prod
+        LambdaLayerVersions: |
+          1,
+          _,
+          _,
+          1

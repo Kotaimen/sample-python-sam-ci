@@ -24,8 +24,8 @@ Globals:
     Timeout: 30
     Tracing: Active
     AutoPublishAlias: live
-#    DeploymentPreference:
-#      Type: AllAtOnce
+    DeploymentPreference:
+      Type: AllAtOnce
 
 Resources:
 
@@ -55,11 +55,6 @@ Resources:
         - AWSXRayDaemonWriteAccess
         - DynamoDBCrudPolicy:
             TableName: !Ref Table
-#        - Version: "2012-10-17"
-#          Statement:
-#            - Effect: Allow
-#              Action: DynamoDB:DescribeTable
-#              Resource: !GetAtt Table.Arn
       Events:
         Api:
           Type: Api
