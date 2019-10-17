@@ -4,22 +4,20 @@ Transform: "AWS::Serverless-2016-10-31"
 
 Parameters:
 
-  ProjectIdentifier:
+  PreReqStack:
     Description: >
-      An unique identifier for the project, must be identical in all templates deployed using same artifact bucket.
+      Name of Pre Requests stack, which is in same account & region of this stack.  Values are automatically
+      extracted from Stack Exports.
     Type: String
-    Default: samwise
     MinLength: 1
-    MaxLength: 16
-    AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
-    ConstraintDescription: Only alphanumeric string is allowed.
-
-  NotificationTopic:
-    Description: >
-      SNS notification topic name
-    Type: String
+    MaxLength: 128
+    AllowedPattern: "[a-zA-Z0-9-]+"
+    ConstraintDescription: >
+      Stack name must start with an alphabetic character and can't be longer
+      than 128 characters
 
 Resources:
+
   PipelineEventCallback:
     Type: AWS::Serverless::Function
     Properties:
@@ -30,11 +28,12 @@ Resources:
       MemorySize: 128
       Environment:
         Variables:
-          PIPELINE_PREFIX: !Sub ${ProjectIdentifier}-
-          SNS_TOPIC_ARN: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${NotificationTopic}
+          # "ProjectIdentifier-"
+          PIPELINE_PREFIX: !Join [ "", [ { Fn::ImportValue: !Sub "${PreReqStack}:ProjectIdentifier" }, "-" ] ]
+          SNS_TOPIC_ARN: { Fn::ImportValue: !Sub "${PreReqStack}:NotificationTopicArn" }
       Policies:
         - SNSPublishMessagePolicy:
-            TopicName: !Ref NotificationTopic
+            TopicName: { Fn::ImportValue: !Sub "${PreReqStack}:NotificationTopic" }
 
       Events:
         # All CodePipeline Events
