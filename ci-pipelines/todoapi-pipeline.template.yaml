@@ -222,9 +222,9 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:2.0
         PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: WORKDIR
-            Value: .
+#        EnvironmentVariables:
+#          - Name: WORKDIR
+#            Value: .
       Cache:
         Type: S3
         Modes:
@@ -261,67 +261,7 @@ Resources:
             build:
               commands:
                 - echo Entered the build phase...
-                - make test
-                - make coverage
-              finally:
-                - echo Leaving build phase...
-            post_build:
-              commands:
-                - echo Entered the post_build phase...
-              finally:
-                - echo Leaving post_build phase...
-          cache:
-            paths:
-              - '/root/.cache/pip/**/*'
-
-  LintProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Description: Run code quality tools
-      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
-      TimeoutInMinutes: 30
-      EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: WORKDIR
-            Value: .
-      Cache:
-        Type: S3
-        Modes:
-          - LOCAL_CUSTOM_CACHE
-        Location: !Join ["/", [{ "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }, "codebuild-cache"]]
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: |
-          version: 0.2
-          env:
-            variables:
-              SAM_CLI_TELEMETRY: 0
-          phases:
-            install:
-              runtime-versions:
-                python: 3.7
-              commands:
-                - echo Entered the install phase...
-                - pip3 install -r requirements-dev.txt
-              finally:
-                - echo Leaving install phase...
-            pre_build:
-              commands:
-                - echo Entered the pre_build phase...
-                - cd ${WORKDIR}
-              finally:
-                - echo Leaving pre_build phrase..
-            build:
-              commands:
-                - echo Entered the build phase...
-                - make lint
+                - make ${MAKE_TAREGET}
               finally:
                 - echo Leaving build phase...
             post_build:
@@ -441,6 +381,29 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TestProject
+                PrimarySource: SourceArtifact
+                EnvironmentVariables: >
+                  [
+                    {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                    {"name": "MAKE_TAREGET", "value": "test", "type": "PLAINTEXT"}
+                  ]
+              InputArtifacts:
+                - Name: SourceArtifact
+            - Name: Coverage
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref TestProject
+                PrimarySource: SourceArtifact
+                EnvironmentVariables: >
+                  [
+                    {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                    {"name": "MAKE_TAREGET", "value": "coverage", "type": "PLAINTEXT"}
+                  ]
               InputArtifacts:
                 - Name: SourceArtifact
             - Name: Lint
@@ -451,7 +414,13 @@ Resources:
                 Version: "1"
                 Provider: CodeBuild
               Configuration:
-                ProjectName: !Ref LintProject
+                ProjectName: !Ref TestProject
+                PrimarySource: SourceArtifact
+                EnvironmentVariables: >
+                  [
+                    {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                    {"name": "MAKE_TAREGET", "value": "lint", "type": "PLAINTEXT"}
+                  ]
               InputArtifacts:
                 - Name: SourceArtifact
 
