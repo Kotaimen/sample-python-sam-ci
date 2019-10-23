@@ -6,17 +6,26 @@ Parameters:
 
   ToolsAccount:
     Description: >
-      AWS AccountNumber for tools (pipelines and artifact infra)
+      AWS AccountNumber for tools (pipelines and artifact infra).
     Type: String
 
-  ArtifactBucket:
+  ArtifactBuckets:
     Description: >
-      Artifact bucket in Tools Account, which holds build artifacts and caches.
-    Type: String
+      A list of S3 artifact buckets in Tools Account, first one must in the primary region.
+    Type: CommaDelimitedList
 
-  KmsKeyArn:
-    Description: ARN of the KMS CMK creates in Tools account
-    Type: String
+  KmsKeyArns:
+    Description: >
+      A list of KMS CMK ARNs in Tools account, first one must in the primary region.
+    Type: CommaDelimitedList
+
+  AdditonalRegions:
+    Description: >
+      Number of additional secondary regions, must match number of items in ArtifactBuckets and KmsKeyArns.
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 1
 
   ProjectIdentifier:
     Description: >
@@ -47,8 +56,9 @@ Metadata:
           default: Project Configuration
         Parameters:
           - ProjectIdentifier
-          - ArtifactBucket
-          - KmsKeyArn
+          - ArtifactBuckets
+          - KmsKeyArns
+          - AdditonalRegions
       - Label:
           default: Misc
         Parameters:
@@ -56,10 +66,12 @@ Metadata:
     ParameterLabels:
       ToolsAccount:
         default: Tools Account
-      ArtifactBucket:
-        default: Artifact Bucket
-      KmsKeyArn:
-        default: KMS Key ARN
+      ArtifactBuckets:
+        default: Artifact Buckets
+      KmsKeyArns:
+        default: KMS Key ARNs
+      AdditonalRegions:
+        default: Additional Regions
       ProjectIdentifier:
         default: Project Identifier
       PermissionsBoundary:
@@ -67,6 +79,9 @@ Metadata:
 
 
 Conditions:
+
+  SecondRegionCondition: !Equals [ !Ref AdditonalRegions, 1 ]
+
   PermissionsBoundaryCondition: !Not [!Equals [!Ref PermissionsBoundary, ""]]
 
 Resources:
@@ -106,7 +121,12 @@ Resources:
               - kms:ReEncrypt*
               - kms:GenerateDataKey*
               - kms:DescribeKey
-            Resource: !Ref KmsKeyArn
+            Resource:
+              - !Select [ 0, !Ref KmsKeyArns ]
+              - !If
+                - SecondRegionCondition
+                - !Select [1, !Ref KmsKeyArns]
+                - !Ref AWS::NoValue
       Roles:
         - !Ref CrossAccountRole
 
@@ -142,12 +162,20 @@ Resources:
               - s3:GetObjectVersion
               - s3:PutObject
             Resource:
-              - !Sub "arn:aws:s3:::${ArtifactBucket}/*"
+              - !Join ["", ["arn:aws:s3:::", !Select [0, !Ref ArtifactBuckets], "/*"]]
+              - !If
+                - SecondRegionCondition
+                - !Join ["", ["arn:aws:s3:::", !Select [1, !Ref ArtifactBuckets], "/*"]]
+                - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - s3:ListBucket
             Resource:
-              - !Sub "arn:aws:s3:::${ArtifactBucket}"
+              - !Join ["", ["arn:aws:s3:::", !Select [0, !Ref ArtifactBuckets]]]
+              - !If
+                  - SecondRegionCondition
+                  - !Join ["", ["arn:aws:s3:::", !Select [1, !Ref ArtifactBuckets]]]
+                  - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - kms:Encrypt
@@ -155,7 +183,12 @@ Resources:
               - kms:ReEncrypt*
               - kms:GenerateDataKey*
               - kms:DescribeKey
-            Resource: !Ref KmsKeyArn
+            Resource:
+              - !Select [ 0, !Ref KmsKeyArns ]
+              - !If
+                - SecondRegionCondition
+                - !Select [1, !Ref KmsKeyArns]
+                - !Ref AWS::NoValue
       Roles:
         - !Ref CloudFormationDeployRole
 

@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Cross account CloudFormation CodePipeline pre-requests, including KMS key, encrypted Artifact bucket, shared
-  CedePipeline and CodeBuild roles, and notification SNS.
+  CloudFormation CodePipeline pre-requests.  The template is designed to be very flexible
+  to support various use cases.  (multiple stages/cross account/cross region).
 
 Parameters:
 
-  DevAccount:
+  Account1:
     Description: >
-      AWS AccountNumber for development stages.
+      AWS AccountNumber stage 1.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -18,9 +18,9 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  TestAccount:
+  Account2:
     Description: >
-      AWS AccountNumber for testing stages.
+      AWS AccountNumber stage 2.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -31,22 +31,9 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  StagingAccount:
+  Account3:
     Description: >
-      AWS AccountNumber for staging stages.
-      Setting this to same account to the pipeline account disables cross account
-      deployment automatically.  Setting to empty string disables the stage
-      entirely.
-    Type: String
-    Default: ""
-    MinLength: 0
-    MaxLength: 12
-    AllowedPattern: "[0-9]*"
-    ConstraintDescription: Must be numberic string or empty.
-
-  ProductionAccount:
-    Description: >
-      AWS AccountNumber for production stages.
+      AWS AccountNumber stage 3.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -59,7 +46,8 @@ Parameters:
 
   ProjectIdentifier:
     Description: >
-      An unique identifier for the project, must be identical in all templates deployed using same artifact bucket.
+      An unique identifier for the project, this parameter must be set to identical value
+      for role stacks and pipeline stacks.
     Type: String
     Default: samwise
     MinLength: 1
@@ -67,61 +55,111 @@ Parameters:
     AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
     ConstraintDescription: Only alphanumeric string is allowed.
 
+  PrimaryRegion:
+    Description: >
+      Primary region for the pipelines, if this is not the same region as the PreReq stack
+      being deployed to,  only ArtifactBucket and KMS key will be created.
+    Type: String
+    Default: us-east-1
+    AllowedValues: [
+      us-east-2,us-east-1,us-west-1,us-west-2,ap-east-1,ap-south-1,ap-northeast-3,
+      ap-northeast-2,ap-southeast-1,ap-southeast-2,ap-northeast-1,ca-central-1,
+      cn-north-1,cn-northwest-1,eu-central-1,eu-west-1,eu-west-2,eu-west-3,eu-north-1,
+      me-south-1,sa-east-1,us-gov-east-1,us-gov-west-1
+    ]
+
+  SecondaryRegion:
+    Description: >
+      Secondary region for the pipelines, specify to empty string disables secondary region.
+      Otherwise, setting this to region where secondary pre-req stack is created.
+    Type: String
+    Default: ""
+    AllowedValues: ["",
+      us-east-2,us-east-1,us-west-1,us-west-2,ap-east-1,ap-south-1,ap-northeast-3,
+      ap-northeast-2,ap-southeast-1,ap-southeast-2,ap-northeast-1,ca-central-1,
+      cn-north-1,cn-northwest-1,eu-central-1,eu-west-1,eu-west-2,eu-west-3,eu-north-1,
+      me-south-1,sa-east-1,us-gov-east-1,us-gov-west-1
+    ]
+
+  SecondaryArtifactBucket:
+    Description: >
+      Secondary region artifact bucket, required when SecondaryRegion is not empty.
+    Type: String
+    Default: ""
+
+  SecondaryKMSKey:
+    Description: >
+      ARN for secondary region KMS secret key, required when SecondaryRegion is not empty.
+    Type: String
+    Default: ""
+
   PermissionsBoundary:
     Description: >
-      ARN of the policy used to set the permissions boundary for the canned CloudFormation deploy role,
-      which assumes administrator access.
+      ARN of the policy used to set the permissions boundary for the canned CloudFormation
+      deploy role, which assumes administrator access.
       Setting this to empty string disables PermissionsBoundary.
     Type: String
     Default: ""
 
-Metadata:
-  AWS::CloudFormation::Interface:
-    ParameterGroups:
-      - Label:
-          default: Account Configuration
-        Parameters:
-          - DevAccount
-          - TestAccount
-          - StagingAccount
-          - ProductionAccount
-      - Label:
-          default: Project Configuration
-        Parameters:
-          - ProjectIdentifier
-      - Label:
-          default: Misc
-        Parameters:
-          - PermissionsBoundary
-    ParameterLabels:
-      DevAccount:
-        default: Development Account
-      TestAccount:
-        default: Testing Account
-      StagingAccount:
-        default: Staging Account
-      ProductionAccount:
-        default: Production Account
-      ProjectIdentifier:
-        default: Project Identifier
-      PermissionsBoundary:
-        default: Permissions Boundary
+#Metadata:
+#  AWS::CloudFormation::Interface:
+#    ParameterGroups:
+#      - Label:
+#          default: Project Configuration
+#        Parameters:
+#          - ProjectIdentifier
+#      - Label:
+#          default: Account Configuration
+#        Parameters:
+#          - Account1
+#          - Account2
+#          - Account3
+#      - Label:
+#          default: Region Configuration
+#        Parameters:
+#          - PrimaryRegion
+#          - SecondaryArtifactBucket
+#          - SecondaryKMSKey
+#      - Label:
+#          default: Misc
+#        Parameters:
+#          - PermissionsBoundary
+#    ParameterLabels:
+#      ProjectIdentifier:
+#        default: Project Identifier
+#      Account1:
+#        default: Account 1
+#      Account2:
+#        default: Account 2
+#      Account3:
+#        default: Account 3
+#      PrimaryRegion:
+#        default: Primary Region
+#      SecondaryArtifactBucket:
+#        default: Secondary Artifact Bucket
+#      SecondaryKMSKey:
+#        default: Secondary KMS Key
+#      PermissionsBoundary:
+#        default: Permissions Boundary
 
 Conditions:
   #  Detect "same account" situation
-  DevCrossAccountCondition: !Not [!Equals [!Ref DevAccount, !Ref "AWS::AccountId"]]
-  TestCrossAccountCondition: !Not [!Equals [!Ref TestAccount, !Ref "AWS::AccountId"]]
-  StagingCrossAccountCondition: !Not [!Equals [!Ref StagingAccount, !Ref "AWS::AccountId"]]
-  ProdCrossAccountCondition: !Not [!Equals [!Ref ProductionAccount, !Ref "AWS::AccountId"]]
+  CrossAccount1Condition: !Not [!Equals [!Ref Account1, !Ref "AWS::AccountId"]]
+  CrossAccount2Condition: !Not [!Equals [!Ref Account2, !Ref "AWS::AccountId"]]
+  CrossAccount3Condition: !Not [!Equals [!Ref Account3, !Ref "AWS::AccountId"]]
 
   # Stages to enable
-  EnableDevelopStageCondition: !Not [!Equals [!Ref DevAccount, ""]]
-  EnableTestStageCondition: !Not [!Equals [!Ref TestAccount, ""]]
-  EnableStagingStageCondition: !Not [!Equals [!Ref StagingAccount, ""]]
-  EnableProductionStageCondition: !Not [!Equals [!Ref ProductionAccount, ""]]
+  EnableStage1Condition: !Not [!Equals [!Ref Account1, ""]]
+  EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
+  EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
+
+  # Cross region
+  IsPrimaryRegionConditon: !Equals [!Ref PrimaryRegion, !Ref "AWS::Region"]
+  UseSecondaryRegionConditon: !Not [!Equals [!Ref SecondaryRegion, ""]]
 
   # Misc
   PermissionsBoundaryCondition: !Not [!Equals [!Ref PermissionsBoundary, ""]]
+
 
 Resources:
 
@@ -132,7 +170,9 @@ Resources:
     Type: AWS::KMS::Key
     Properties:
       Description: Used by assumed roles in target accounts to Encrypt/Decrypt artifact
+      Enabled: true
       EnableKeyRotation: true
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: "2012-10-17"
         Id: !Ref AWS::StackName
@@ -161,12 +201,11 @@ Resources:
             Effect: Allow
             Principal:
               AWS:
-                - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:root", !Ref "AWS::NoValue" ]
-                - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:root", !Ref "AWS::NoValue" ]
-                - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:root", !Ref "AWS::NoValue" ]
-                - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:root", !Ref "AWS::NoValue" ]
-                - !GetAtt CodeBuildServiceRole.Arn
-                - !GetAtt CodePipelineServiceRole.Arn
+                - !If [ EnableStage1Condition, !Sub "arn:aws:iam::${Account1}:root", !Ref "AWS::NoValue" ]
+                - !If [ EnableStage2Condition, !Sub "arn:aws:iam::${Account2}:root", !Ref "AWS::NoValue" ]
+                - !If [ EnableStage3Condition, !Sub "arn:aws:iam::${Account3}:root", !Ref "AWS::NoValue" ]
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectIdentifier}-CodeBuildServiceRole"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectIdentifier}-CodePipelineServiceRole"
             Action:
               - kms:Encrypt
               - kms:Decrypt
@@ -178,13 +217,14 @@ Resources:
   KMSAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub alias/${ProjectIdentifier}-pipeline-master
+      AliasName: !Sub alias/${ProjectIdentifier}-${AWS::Region}
       TargetKeyId: !Ref KMSKey
 
   #
   # Source bundle bucket
   #
   SourceBucket:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::S3::Bucket
     Properties:
       VersioningConfiguration:
@@ -201,9 +241,11 @@ Resources:
               KMSMasterKeyID: !Ref KMSAlias
 
   CloudTrailBucket:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::S3::Bucket
 
   CloudTrailBucketPolicy:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref CloudTrailBucket
@@ -282,21 +324,21 @@ Resources:
             Resource: !Sub ${ArtifactBucket.Arn}/*
             Principal:
               AWS:
-                - !If [ EnableDevelopStageCondition, !Ref DevAccount, !Ref "AWS::NoValue" ]
-                - !If [ EnableTestStageCondition, !Ref TestAccount, !Ref "AWS::NoValue" ]
-                - !If [ EnableStagingStageCondition, !Ref StagingAccount, !Ref "AWS::NoValue" ]
-                - !If [ EnableProductionStageCondition, !Ref ProductionAccount, !Ref "AWS::NoValue" ]
+                - !If [ EnableStage1Condition, !Ref Account1, !Ref "AWS::NoValue" ]
+                - !If [ EnableStage2Condition, !Ref Account2, !Ref "AWS::NoValue" ]
+                - !If [ EnableStage3Condition, !Ref Account3, !Ref "AWS::NoValue" ]
 
   #
   # Notifications
   #
-
   NotificationTopic:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::SNS::Topic
     Properties:
       DisplayName: !Sub "${ProjectIdentifier} CodePipeline Notification"
 
   NotificationTopicPolicy:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::SNS::TopicPolicy
     Properties:
       PolicyDocument:
@@ -307,10 +349,9 @@ Resources:
           Principal:
             AWS:
               - !Ref AWS::AccountId
-              - !If [ EnableDevelopStageCondition, !Ref DevAccount, !Ref "AWS::NoValue" ]
-              - !If [ EnableTestStageCondition, !Ref TestAccount, !Ref "AWS::NoValue" ]
-              - !If [ EnableStagingStageCondition, !Ref StagingAccount, !Ref "AWS::NoValue" ]
-              - !If [ EnableProductionStageCondition, !Ref ProductionAccount, !Ref "AWS::NoValue" ]
+              - !If [ EnableStage1Condition, !Ref Account1, !Ref "AWS::NoValue" ]
+              - !If [ EnableStage2Condition, !Ref Account2, !Ref "AWS::NoValue" ]
+              - !If [ EnableStage3Condition, !Ref Account3, !Ref "AWS::NoValue" ]
           Action: sns:Publish
           Resource: !Ref NotificationTopic
       Topics:
@@ -320,9 +361,10 @@ Resources:
   # Roles
   #
   CodePipelineServiceRole:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectIdentifier}-codepipeline-role
+      RoleName: !Sub ${ProjectIdentifier}-CodePipelineServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -334,8 +376,10 @@ Resources:
       Path: /
 
   CodeBuildServiceRole:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub ${ProjectIdentifier}-CodeBuildServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -348,6 +392,7 @@ Resources:
 
   # See https://docs.aws.amazon.com/codepipeline/latest/userguide/how-to-custom-role.html#view-default-service-role-policy
   CodePipelineCannedPolicy:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: !Sub ${AWS::StackName}-CodePipelineCannedPolicy
@@ -455,6 +500,7 @@ Resources:
         - !Ref CodePipelineServiceRole
 
   CodePipelinePolicy:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::IAM::ManagedPolicy
     Properties:
       PolicyDocument:
@@ -462,12 +508,16 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - s3:PutObject
+              - s3:PutObjectd
               - s3:GetObject
               - s3:GetObjectVersion
             Resource:
               - !Sub ${ArtifactBucket.Arn}/*
-              - !Sub ${SourceBucket.Arn}/* 
+              - !Sub ${SourceBucket.Arn}/*
+              - !If
+                - UseSecondaryRegionConditon
+                - !Sub "arn:aws:s3:::${SecondaryArtifactBucket}/*"
+                - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - s3:GetBucketPolicy
@@ -475,10 +525,19 @@ Resources:
             Resource:
               - !Sub ${ArtifactBucket.Arn}
               - !Sub ${SourceBucket.Arn}
+              - !If
+                - UseSecondaryRegionConditon
+                - !Sub "arn:aws:s3:::${SecondaryArtifactBucket}"
+                - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - kms:Decrypt
-            Resource: !GetAtt KMSKey.Arn
+            Resource:
+              - !GetAtt KMSKey.Arn
+              - !If
+                - UseSecondaryRegionConditon
+                - !Ref SecondaryKMSKey
+                - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - iam:PassRole
@@ -487,10 +546,9 @@ Resources:
             Action:
               - sts:AssumeRole
             Resource:
-              - !If [ EnableDevelopStageCondition, !Sub "arn:aws:iam::${DevAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableTestStageCondition, !Sub "arn:aws:iam::${TestAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableStagingStageCondition, !Sub "arn:aws:iam::${StagingAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
-              - !If [ EnableProductionStageCondition, !Sub "arn:aws:iam::${ProductionAccount}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableStage1Condition, !Sub "arn:aws:iam::${Account1}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableStage2Condition, !Sub "arn:aws:iam::${Account2}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
+              - !If [ EnableStage3Condition, !Sub "arn:aws:iam::${Account3}:role/${ProjectIdentifier}-CrossAccountRole", !Ref "AWS::NoValue" ]
           - Effect: Allow
             Action:
               - sns:Publish
@@ -500,6 +558,7 @@ Resources:
         - !Ref CodePipelineServiceRole
 
   CodeBuildPolicy:
+    Condition: IsPrimaryRegionConditon
     Type: AWS::IAM::ManagedPolicy
     Properties:
       PolicyDocument:
@@ -539,6 +598,7 @@ Resources:
         - !Ref CodeBuildServiceRole
 
   CloudFormationDeployRole:
+    Condition: IsPrimaryRegionConditon
     Type: "AWS::IAM::Role"
     Properties:
       AssumeRolePolicyDocument:
@@ -566,11 +626,11 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}:ProjectIdentifier
 
-  KmsKeyId:
-    Description: KMS Key ID
-    Value: !Ref KMSKey
-    Export:
-      Name: !Sub ${AWS::StackName}:KmsKeyId
+#  KmsKeyId:
+#    Description: KMS Key ID
+#    Value: !Ref KMSKey
+#    Export:
+#      Name: !Sub ${AWS::StackName}:KmsKeyId
 
   KmsKeyArn:
     Description: KMS Key ARN
@@ -585,24 +645,28 @@ Outputs:
       Name: !Sub ${AWS::StackName}:KeyAlias
 
   SourceBucket:
+    Condition: IsPrimaryRegionConditon
     Description: Source bucket name
     Value: !Ref SourceBucket
     Export:
       Name: !Sub ${AWS::StackName}:SourceBucket
       
   SourceBucketArn:
+    Condition: IsPrimaryRegionConditon
     Description: Source bucket arn
     Value: !GetAtt SourceBucket.Arn
     Export:
       Name: !Sub ${AWS::StackName}:SourceBucketArn
 
   CloudTrailBucket:
+    Condition: IsPrimaryRegionConditon
     Description: CloudTrail bucket name
     Value: !Ref CloudTrailBucket
     Export:
       Name: !Sub ${AWS::StackName}:CloudTrailBucket
       
   CloudTrailBucketArn:
+    Condition: IsPrimaryRegionConditon
     Description: CloudTrail bucket arn
     Value: !GetAtt CloudTrailBucket.Arn
     Export:
@@ -621,32 +685,70 @@ Outputs:
       Name: !Sub ${AWS::StackName}:ArtifactBucketArn
 
   CodePipelineRoleArn:
+    Condition: IsPrimaryRegionConditon
     Description: CodePipeline role ARN
     Value: !GetAtt CodePipelineServiceRole.Arn
     Export:
       Name: !Sub ${AWS::StackName}:CodePipelineRoleArn
 
   CodeBuildRoleArn:
+    Condition: IsPrimaryRegionConditon
     Description: CodeBuild role ARN
     Value: !GetAtt CodeBuildServiceRole.Arn
     Export:
       Name: !Sub ${AWS::StackName}:CodeBuildRoleArn
 
   CloudFormationDeployRoleArn:
+    Condition: IsPrimaryRegionConditon
     Description: CloudFormation Stack role ARN
     Value: !GetAtt CloudFormationDeployRole.Arn
     Export:
       Name: !Sub ${AWS::StackName}:CloudFormationDeployRoleArn
 
   NotificationTopic:
+    Condition: IsPrimaryRegionConditon
     Description: Pipeline notification topic name
     Value: !GetAtt NotificationTopic.TopicName
     Export:
       Name: !Sub ${AWS::StackName}:NotificationTopic
 
   NotificationTopicArn:
+    Condition: IsPrimaryRegionConditon
     Description: Pipeline notification topic ARN
     Value: !Ref NotificationTopic
     Export:
       Name: !Sub ${AWS::StackName}:NotificationTopicArn
 
+  PrimaryRegion:
+    Description: Primary region
+    Value: !Ref PrimaryRegion
+    Export:
+      Name: !Sub ${AWS::StackName}:PrimaryRegion
+
+  SecondaryRegion:
+    Condition: UseSecondaryRegionConditon
+    Description: Secondary region
+    Value: !Ref SecondaryRegion
+    Export:
+      Name: !Sub ${AWS::StackName}:SecondaryRegion
+
+  SecondaryArtifactBucket:
+    Condition: UseSecondaryRegionConditon
+    Description: Secondary artifact bucket name
+    Value: !Ref SecondaryArtifactBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:SecondaryArtifactBucket
+
+  SecondaryArtifactBucketArn:
+    Condition: UseSecondaryRegionConditon
+    Description: Secondary artifact bucket ARN
+    Value: !Sub arn:aws:s3:::${SecondaryArtifactBucket}
+    Export:
+      Name: !Sub ${AWS::StackName}:SecondaryArtifactBucketArn
+
+  SecondaryKmsKeyArn:
+    Condition: UseSecondaryRegionConditon
+    Description: Secondary KMS Key ARN
+    Value: !Ref SecondaryKMSKey
+    Export:
+      Name: !Sub ${AWS::StackName}:SecondaryKmsKeyArn
