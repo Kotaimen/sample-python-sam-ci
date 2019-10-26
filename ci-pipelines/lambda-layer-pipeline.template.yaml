@@ -111,51 +111,58 @@ Parameters:
     Default: stack-name
 
 
-#Metadata:
-#  AWS::CloudFormation::Interface:
-#    ParameterGroups:
-#      - Label:
-#          default: Account Configuration
-#        Parameters:
-#          - DevAccount
-#          - TestAccount
-#          - StagingAccount
-#          - ProductionAccount
-#      - Label:
-#          default: Project Configuration
-#        Parameters:
-#          - PreReqStack
-#          - SourceBucket
-#          - SourcePrefix
-#      - Label:
-#          default: Pipeline Behaviour
-#          - StageTransitionConfirm
-#      - Label:
-#          default: Stack Configuration
-#        Parameters:
-#          - StackNames
-#          - LayerNames
-#    ParameterLabels:
-#      DevAccount:
-#        default: Development Account
-#      TestAccount:
-#        default: Testing Account
-#      StagingAccount:
-#        default: Staging Account
-#      ProductionAccount:
-#        default: Production Account
-#      StageTransitionConfirm:
-#        default: Stage Transition Confirm
-#      PreReqStack:
-#        default: PreRequests Stack
-#      SourceBucket:
-#        default: Source Bucket
-#      SourcePrefix:
-#        default: Source Prefix
-#      StackNames:
-#        default: Stack Names
-#      LayerNames:
-#        default: Layer Names
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Configuration
+        Parameters:
+          - PreReqStack
+          - SourceBucket
+          - SourcePrefix
+      - Label:
+          default: Account Configuration
+        Parameters:
+          - Account1
+          - Account2
+          - Account3
+      - Label:
+          default: Pipeline Behaviour
+        Parameters:
+          - StageNames
+          - DeployToRegion
+          - ConfirmStageTransition
+          - BlockLastStage
+      - Label:
+          default: Stack Configuration
+        Parameters:
+          - StackNames
+          - LayerNames
+    ParameterLabels:
+      PreReqStack:
+        default: PreRequests Stack
+      SourceBucket:
+        default: Source Bucket
+      SourcePrefix:
+        default: Source Prefix
+      Account1:
+        default: Account 1
+      Account2:
+        default: Account 2
+      Account3:
+        default: Account 3
+      StageNames:
+        default: Stage Names
+      DeployToRegion:
+        default: Deploy to Region
+      ConfirmStageTransition:
+        default: Confirm Stage Transition
+      BlockLastStage:
+        default: Block Last Stage
+      StackNames:
+        default: Stack Names
+      LayerNames:
+        default: Layer Names
 
 
 Conditions:

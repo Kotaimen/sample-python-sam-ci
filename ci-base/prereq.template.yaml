@@ -101,46 +101,49 @@ Parameters:
     Type: String
     Default: ""
 
-#Metadata:
-#  AWS::CloudFormation::Interface:
-#    ParameterGroups:
-#      - Label:
-#          default: Project Configuration
-#        Parameters:
-#          - ProjectIdentifier
-#      - Label:
-#          default: Account Configuration
-#        Parameters:
-#          - Account1
-#          - Account2
-#          - Account3
-#      - Label:
-#          default: Region Configuration
-#        Parameters:
-#          - PrimaryRegion
-#          - SecondaryArtifactBucket
-#          - SecondaryKMSKey
-#      - Label:
-#          default: Misc
-#        Parameters:
-#          - PermissionsBoundary
-#    ParameterLabels:
-#      ProjectIdentifier:
-#        default: Project Identifier
-#      Account1:
-#        default: Account 1
-#      Account2:
-#        default: Account 2
-#      Account3:
-#        default: Account 3
-#      PrimaryRegion:
-#        default: Primary Region
-#      SecondaryArtifactBucket:
-#        default: Secondary Artifact Bucket
-#      SecondaryKMSKey:
-#        default: Secondary KMS Key
-#      PermissionsBoundary:
-#        default: Permissions Boundary
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Configuration
+        Parameters:
+          - ProjectIdentifier
+          - PermissionsBoundary
+      - Label:
+          default: Account Configuration
+        Parameters:
+          - Account1
+          - Account2
+          - Account3
+      - Label:
+          default: Region Configuration
+        Parameters:
+          - PrimaryRegion
+          - SecondaryRegion
+          - SecondaryArtifactBucket
+          - SecondaryKMSKey
+      - Label:
+          default: Misc
+        Parameters:
+    ParameterLabels:
+      ProjectIdentifier:
+        default: Project Identifier
+      PermissionsBoundary:
+        default: Permissions Boundary
+      Account1:
+        default: Account 1
+      Account2:
+        default: Account 2
+      Account3:
+        default: Account 3
+      PrimaryRegion:
+        default: Primary Region
+      SecondaryRegion:
+        default: Secondary Region
+      SecondaryArtifactBucket:
+        default: Secondary Artifact Bucket
+      SecondaryKMSKey:
+        default: Secondary KMS Key
 
 Conditions:
   #  Detect "same account" situation
