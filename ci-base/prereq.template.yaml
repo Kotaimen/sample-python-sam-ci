@@ -508,12 +508,11 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - s3:PutObjectd
+              - s3:PutObject
               - s3:GetObject
               - s3:GetObjectVersion
             Resource:
               - !Sub ${ArtifactBucket.Arn}/*
-              - !Sub ${SourceBucket.Arn}/*
               - !If
                 - UseSecondaryRegionConditon
                 - !Sub "arn:aws:s3:::${SecondaryArtifactBucket}/*"
@@ -587,13 +586,24 @@ Resources:
           - Effect: Allow
             Action:
               - s3:PutObject
-              - s3:GetBucketPolicy
               - s3:GetObject
               - s3:GetObjectVersion
+            Resource:
+              - !Sub ${ArtifactBucket.Arn}/*
+              - !If
+                - UseSecondaryRegionConditon
+                - !Sub "arn:aws:s3:::${SecondaryArtifactBucket}/*"
+                - !Ref AWS::NoValue
+          - Effect: Allow
+            Action:
+              - s3:GetBucketPolicy
               - s3:ListBucket
             Resource:
               - !Sub ${ArtifactBucket.Arn}
-              - !Sub ${ArtifactBucket.Arn}/*
+              - !If
+                - UseSecondaryRegionConditon
+                - !Sub "arn:aws:s3:::${SecondaryArtifactBucket}"
+                - !Ref AWS::NoValue
       Roles:
         - !Ref CodeBuildServiceRole
 
