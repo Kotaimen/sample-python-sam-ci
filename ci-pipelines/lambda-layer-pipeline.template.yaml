@@ -6,8 +6,7 @@ Parameters:
 
   PreReqStack:
     Description: >
-      Name of pre-requests stack, this is in same account&region of the
-      pipeline stack.
+      Name of pre-requests stack, must be in same account&region of the pipeline stack.
     Type: String
     MinLength: 1
     MaxLength: 128
@@ -30,9 +29,9 @@ Parameters:
     MinLength: 1
     MaxLength: 256
 
-  DevAccount:
+  Account1:
     Description: >
-      AWS AccountNumber for development stages.
+      AWS AccountNumber for stage 1.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -43,9 +42,9 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  TestAccount:
+  Account2:
     Description: >
-      AWS AccountNumber for testing stages.
+      AWS AccountNumber for stage 2.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -56,9 +55,9 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  StagingAccount:
+  Account3:
     Description: >
-      AWS AccountNumber for staging stages.
+      AWS AccountNumber for stage 3.
       Setting this to same account to the pipeline account disables cross account
       deployment automatically.  Setting to empty string disables the stage
       entirely.
@@ -69,101 +68,112 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  ProductionAccount:
+  DeployToRegion:
     Description: >
-      AWS AccountNumber for production stages.
-      Setting this to same account to the pipeline account disables cross account
-      deployment automatically.  Setting to empty string disables the stage
-      entirely.
+      Deploy to specified region, note secondary region will only work when the PreReq are setup properly.
     Type: String
-    Default: ""
-    MinLength: 0
-    MaxLength: 12
-    AllowedPattern: "[0-9]*"
-    ConstraintDescription: Must be numberic string or empty.
+    Default: Primary
+    AllowedValues: [Primary, Secondary]
 
-  StageTransitionConfirm:
+  StageNames:
     Description: >
-      Require manual confirm on stage transitions
+      Deployment stage names of the pipeline, separated by ",".
+    Type: CommaDelimitedList
+    Default: Development,Testing,Production
+
+  ConfirmStageTransition:
+    Description: >
+      Require manual confirm on stage transitions.
     Type: String
     Default: "no"
     AllowedValues: ["yes", "no"]
 
-  StackNames:
+  BlockLastStage:
     Description: >
-      Name of the lambda layer stack in each stages, separated by ",", unused stages can be ignored.
-      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
-    Type: CommaDelimitedList
-    Default: stack-name
+      Block transaction to last (typically set to production) stage,
+      this only works when last stage is enabled.
+    Type: String
+    Default: "no"
+    AllowedValues: ["yes", "no"]
 
   LayerNames:
     Description: >
       Name of the lambda layer in each stages, separated by ",", unused stages can be ignored.
-      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
+      Eg: "Dev", "Dev,Test" or "_,Test,Prod".
     Type: CommaDelimitedList
     Default: layer-name
 
-Metadata:
-  AWS::CloudFormation::Interface:
-    ParameterGroups:
-      - Label:
-          default: Account Configuration
-        Parameters:
-          - DevAccount
-          - TestAccount
-          - StagingAccount
-          - ProductionAccount
-      - Label:
-          default: Project Configuration
-        Parameters:
-          - PreReqStack
-          - SourceBucket
-          - SourcePrefix
-          - StageTransitionConfirm
-      - Label:
-          default: Stack Configuration
-        Parameters:
-          - StackNames
-          - LayerNames
-    ParameterLabels:
-      DevAccount:
-        default: Development Account
-      TestAccount:
-        default: Testing Account
-      StagingAccount:
-        default: Staging Account
-      ProductionAccount:
-        default: Production Account
-      StageTransitionConfirm:
-        default: Stage Transition Confirm
-      PreReqStack:
-        default: PreRequests Stack
-      SourceBucket:
-        default: Source Bucket
-      SourcePrefix:
-        default: Source Prefix
-      StackNames:
-        default: Stack Names
-      LayerNames:
-        default: Layer Names
+  StackNames:
+    Description: >
+      Name of the lambda layer stack in each stages, separated by ",", unused stages can be ignored.
+      Eg: "Dev", "Dev,Test" or "_,Test,Prod".
+    Type: CommaDelimitedList
+    Default: stack-name
+
+
+#Metadata:
+#  AWS::CloudFormation::Interface:
+#    ParameterGroups:
+#      - Label:
+#          default: Account Configuration
+#        Parameters:
+#          - DevAccount
+#          - TestAccount
+#          - StagingAccount
+#          - ProductionAccount
+#      - Label:
+#          default: Project Configuration
+#        Parameters:
+#          - PreReqStack
+#          - SourceBucket
+#          - SourcePrefix
+#      - Label:
+#          default: Pipeline Behaviour
+#          - StageTransitionConfirm
+#      - Label:
+#          default: Stack Configuration
+#        Parameters:
+#          - StackNames
+#          - LayerNames
+#    ParameterLabels:
+#      DevAccount:
+#        default: Development Account
+#      TestAccount:
+#        default: Testing Account
+#      StagingAccount:
+#        default: Staging Account
+#      ProductionAccount:
+#        default: Production Account
+#      StageTransitionConfirm:
+#        default: Stage Transition Confirm
+#      PreReqStack:
+#        default: PreRequests Stack
+#      SourceBucket:
+#        default: Source Bucket
+#      SourcePrefix:
+#        default: Source Prefix
+#      StackNames:
+#        default: Stack Names
+#      LayerNames:
+#        default: Layer Names
 
 
 Conditions:
-  # Detect "same account" situation
-  DevCrossAccountCondition: !Not [!Equals [!Ref DevAccount, !Ref "AWS::AccountId"]]
-  TestCrossAccountCondition: !Not [!Equals [!Ref TestAccount, !Ref "AWS::AccountId"]]
-  StagingCrossAccountCondition: !Not [!Equals [!Ref StagingAccount, !Ref "AWS::AccountId"]]
-  ProductionCrossAccountCondition: !Not [!Equals [!Ref ProductionAccount, !Ref "AWS::AccountId"]]
+  #  Detect "same account" situation
+  CrossAccount1Condition: !Not [!Equals [!Ref Account1, !Ref "AWS::AccountId"]]
+  CrossAccount2Condition: !Not [!Equals [!Ref Account2, !Ref "AWS::AccountId"]]
+  CrossAccount3Condition: !Not [!Equals [!Ref Account3, !Ref "AWS::AccountId"]]
 
   # Stages to enable
-  EnableDevStageCondition: !Not [!Equals [!Ref DevAccount, ""]]
-  EnableTestStageCondition: !Not [!Equals [!Ref TestAccount, ""]]
-  EnableStagingStageCondition: !Not [!Equals [!Ref StagingAccount, ""]]
-  EnableProductionStageCondition: !Not [!Equals [!Ref ProductionAccount, ""]]
+  EnableStage1Condition: !Not [!Equals [!Ref Account1, ""]]
+  EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
+  EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
 
   #Misc
   UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
-  StageTransitionConfirmConditon: !Equals [!Ref StageTransitionConfirm, "yes"]
+  ConfirmStageTransitionConditon: !Equals [!Ref ConfirmStageTransition, "yes"]
+  BlockLastStageCondition: !Equals [!Ref BlockLastStage, "yes"]
+  UseSecondaryRegionConditon: !Equals [!Ref DeployToRegion, "Secondary"]
 
 Resources:
 
@@ -181,15 +191,6 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:2.0
         PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: WORKDIR
-            Value: infra/lambda-layers/
-          - Name: TEMPLATE_BUCKET
-            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-          - Name: TEMPLATE_PREFIX
-            Value: codebuild-packaged-templates
-          - Name: KMS_KEY_ARN
-            Value: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
       Cache:
         Type: S3
         Modes:
@@ -247,13 +248,31 @@ Resources:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineRoleArn" }
-      ArtifactStore:
-        Type: S3
-        Location: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-        EncryptionKey:
-          Type: KMS
-          Id: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+      ArtifactStores:
+        - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:PrimaryRegion" }
+          ArtifactStore:
+            Type: S3
+            Location: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+            EncryptionKey:
+              Type: KMS
+              Id: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+        - Fn::If:
+          - UseSecondaryRegionConditon
+          - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+            ArtifactStore:
+              Type: S3
+              Location: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+              EncryptionKey:
+                Type: KMS
+                Id: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+          - !Ref AWS::NoValue
       RestartExecutionOnUpdate: false
+      DisableInboundStageTransitions:
+        Fn::If:
+          - BlockLastStageCondition
+          - - StageName: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
+              Reason: "Disabled transition"
+          - !Ref AWS::NoValue
       Stages:
 
         - Name: Source
@@ -286,26 +305,48 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref LambdaLayerProject
+                PrimarySource: SourceArtifact
+                EnvironmentVariables:
+                  Fn::Sub:
+                    - >
+                      [
+                        {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
+                        {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
+                        {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
+                        {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
+                      ]
+                    - TEMPLATE_BUCKET: !If
+                        - UseSecondaryRegionConditon
+                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+                        - { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+                      KMS_KEY_ARN: !If
+                        - UseSecondaryRegionConditon
+                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+                        - { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: LambdaLayerArtifact
 
         - Fn::If:
-          - EnableDevStageCondition
-          - Name: DeployToDevelop
+          - EnableStage1Condition
+          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
+                Region: !If
+                  - UseSecondaryRegionConditon
+                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
                   Version: "1"
                   Provider: CloudFormation
                 RoleArn: !If
-                  - DevCrossAccountCondition
+                  - CrossAccount1Condition
                   - !Sub
-                    - arn:aws:iam::${DevAccount}:role/${ProjectName}-CrossAccountRole
+                    - arn:aws:iam::${Account1}:role/${ProjectName}-CrossAccountRole
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
@@ -315,9 +356,9 @@ Resources:
                 Configuration:
                   ActionMode: CREATE_UPDATE
                   RoleArn: !If
-                    - DevCrossAccountCondition
+                    - CrossAccount1Condition
                     - !Sub
-                      - arn:aws:iam::${DevAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - arn:aws:iam::${Account1}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
@@ -326,13 +367,11 @@ Resources:
                   TemplateConfiguration: LambdaLayerArtifact::stack-config.json
                   ParameterOverrides: !Sub
                     - >
-                      {
-                        "CommonLayerName": "${CommonLayerName}"
-                      }
+                      {"CommonLayerName": "${CommonLayerName}" }
                     - CommonLayerName: !Select [0, !Ref LayerNames]
                   OutputFileName: stack-output.json
               - Fn::If:
-                - StageTransitionConfirmConditon
+                - ConfirmStageTransitionConditon
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -342,25 +381,29 @@ Resources:
                     Provider: Manual
                   Configuration:
                     NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
-                    CustomData: Review Development Stage
+                    CustomData: !Sub [ "Review ${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
         - Fn::If:
-          - EnableTestStageCondition
-          - Name: DeployToTest
+          - EnableStage2Condition
+          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 1, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
+                Region: !If
+                  - UseSecondaryRegionConditon
+                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
                   Version: "1"
                   Provider: CloudFormation
                 RoleArn: !If
-                  - TestCrossAccountCondition
+                  - CrossAccount2Condition
                   - !Sub
-                    - arn:aws:iam::${TestAccount}:role/${ProjectName}-CrossAccountRole
+                    - arn:aws:iam::${Account2}:role/${ProjectName}-CrossAccountRole
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
@@ -370,9 +413,9 @@ Resources:
                 Configuration:
                   ActionMode: CREATE_UPDATE
                   RoleArn: !If
-                    - TestCrossAccountCondition
+                    - CrossAccount2Condition
                     - !Sub
-                      - arn:aws:iam::${TestAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - arn:aws:iam::${Account2}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
@@ -381,13 +424,11 @@ Resources:
                   TemplateConfiguration: LambdaLayerArtifact::stack-config.json
                   ParameterOverrides: !Sub
                     - >
-                      {
-                        "CommonLayerName": "${CommonLayerName}"
-                      }
+                      { "CommonLayerName": "${CommonLayerName}" }
                     - CommonLayerName: !Select [1, !Ref LayerNames]
                   OutputFileName: stack-output.json
               - Fn::If:
-                - StageTransitionConfirmConditon
+                - ConfirmStageTransitionConditon
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -397,37 +438,41 @@ Resources:
                     Provider: Manual
                   Configuration:
                     NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
-                    CustomData: Review Testing Stage
+                    CustomData: !Sub [ "Review ${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
         - Fn::If:
-          - EnableStagingStageCondition
-          - Name: DeployToStaging
+          - EnableStage3Condition
+          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
+                Region: !If
+                  - UseSecondaryRegionConditon
+                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
                   Version: "1"
                   Provider: CloudFormation
                 RoleArn: !If
-                  - StagingCrossAccountCondition
+                  - CrossAccount3Condition
                   - !Sub
-                    - arn:aws:iam::${StagingAccount}:role/${ProjectName}-CrossAccountRole
+                    - arn:aws:iam::${Account3}:role/${ProjectName}-CrossAccountRole
                     - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   - !Ref AWS::NoValue
                 InputArtifacts:
                   - Name: LambdaLayerArtifact
                 OutputArtifacts:
-                  - Name: StagingStackOutput
+                  - Name: ProdStackOutput
                 Configuration:
                   ActionMode: CREATE_UPDATE
                   RoleArn: !If
-                    - StagingCrossAccountCondition
+                    - CrossAccount3Condition
                     - !Sub
-                      - arn:aws:iam::${StagingAccount}:role/${ProjectName}-CloudFormationDeployRole
+                      - arn:aws:iam::${Account3}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
@@ -438,59 +483,6 @@ Resources:
                     - >
                       { "CommonLayerName": "${CommonLayerName}" }
                     - CommonLayerName: !Select [2, !Ref LayerNames]
-                  OutputFileName: stack-output.json
-              - Fn::If:
-                - StageTransitionConfirmConditon
-                - Name: Review
-                  RunOrder: 2
-                  ActionTypeId:
-                    Category: Approval
-                    Owner: AWS
-                    Version: "1"
-                    Provider: Manual
-                  Configuration:
-                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
-                    CustomData: Review Staging
-                - !Ref AWS::NoValue
-          - !Ref AWS::NoValue
-
-        - Fn::If:
-          - EnableProductionStageCondition
-          - Name: DeployToProduction
-            Actions:
-              - Name: Deploy
-                RunOrder: 1
-                ActionTypeId:
-                  Category: Deploy
-                  Owner: AWS
-                  Version: "1"
-                  Provider: CloudFormation
-                RoleArn: !If
-                  - ProductionCrossAccountCondition
-                  - !Sub
-                    - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CrossAccountRole
-                    - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
-                  - !Ref AWS::NoValue
-                InputArtifacts:
-                  - Name: LambdaLayerArtifact
-                OutputArtifacts:
-                  - Name: ProdStackOutput
-                Configuration:
-                  ActionMode: CREATE_UPDATE
-                  RoleArn: !If
-                    - ProductionCrossAccountCondition
-                    - !Sub
-                      - arn:aws:iam::${ProductionAccount}:role/${ProjectName}-CloudFormationDeployRole
-                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
-                    - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
-                  StackName: !Select [3, !Ref StackNames]
-                  TemplatePath: LambdaLayerArtifact::packaged.yaml
-                  TemplateConfiguration: LambdaLayerArtifact::stack-config.json
-                  ParameterOverrides: !Sub
-                    - >
-                      { "CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [3, !Ref LayerNames]
                   OutputFileName: stack-output.json
           - !Ref AWS::NoValue
 
