@@ -68,16 +68,22 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  DeployToRegion:
+  PipelineName:
     Description: >
-      Deploy to specified region, note secondary region will only work when the PreReq are setup properly.
+      Name of the pipeline being created, by default a random name is generated
     Type: String
-    Default: Primary
-    AllowedValues: [Primary, Secondary]
+    Default: ""
+
+  UseSecondaryRegion:
+    Description: >
+      Deploy to secondary region, note secondary region will only work when the PreReq are setup properly.
+    Type: String
+    Default: "no"
+    AllowedValues: ["yes", "no"]
 
   StageNames:
     Description: >
-      Deployment stage names of the pipeline, separated by ",".
+      Deployment stage names of the pipeline, separated by ",".  Default names are: Development,Testing,Production.
     Type: CommaDelimitedList
     Default: Development,Testing,Production
 
@@ -110,7 +116,6 @@ Parameters:
     Type: CommaDelimitedList
     Default: stack-name
 
-
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -129,6 +134,7 @@ Metadata:
       - Label:
           default: Pipeline Behaviour
         Parameters:
+          - PipelineName
           - StageNames
           - DeployToRegion
           - ConfirmStageTransition
@@ -151,6 +157,8 @@ Metadata:
         default: Account 2
       Account3:
         default: Account 3
+      PipelineName:
+        default: Pipeline Name
       StageNames:
         default: Stage Names
       DeployToRegion:
@@ -176,11 +184,12 @@ Conditions:
   EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
   EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
 
-  #Misc
-  UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
-  ConfirmStageTransitionConditon: !Equals [!Ref ConfirmStageTransition, "yes"]
+  # Misc
+  NamedPipelineCondition: !Not [!Equals [!Ref PipelineName, ""]]
+  UseDefaultSourceBucketCondition: !Equals [!Ref SourceBucket, ""]
+  ConfirmStageTransitionCondition: !Equals [!Ref ConfirmStageTransition, "yes"]
   BlockLastStageCondition: !And [!Condition EnableStage3Condition, !Equals [!Ref BlockLastStage, "yes"]]
-  UseSecondaryRegionConditon: !Equals [!Ref DeployToRegion, "Secondary"]
+  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
 
 Resources:
 
@@ -254,6 +263,11 @@ Resources:
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
+      Name:
+        Fn::If:
+          - NamedPipelineCondition
+          - !Ref PipelineName
+          - !Ref AWS::NoValue
       RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineServiceRoleArn" }
       ArtifactStores:
         - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:PrimaryRegion" }
@@ -264,7 +278,7 @@ Resources:
               Type: KMS
               Id: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
         - Fn::If:
-          - UseSecondaryRegionConditon
+          - UseSecondaryRegionCondition
           - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
             ArtifactStore:
               Type: S3
@@ -293,7 +307,7 @@ Resources:
                 Provider: S3
               Configuration:
                 S3Bucket: !If
-                  - UseDefaultSourceBucketConditon
+                  - UseDefaultSourceBucketCondition
                   - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                   - !Ref SourceBucket
                 S3ObjectKey: !Ref SourcePrefix
@@ -303,7 +317,7 @@ Resources:
 
         - Name: Build
           Actions:
-            - Name: BuildLambdaLayer
+            - Name: BuildLayer
               RunOrder: 1
               ActionTypeId:
                 Category: Build
@@ -322,18 +336,40 @@ Resources:
                         {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
                         {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
                       ]
-                    - TEMPLATE_BUCKET: !If
-                        - UseSecondaryRegionConditon
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-                      KMS_KEY_ARN: !If
-                        - UseSecondaryRegionConditon
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+                    - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+                      KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: LambdaLayerArtifact
+            - Fn::If:
+              - UseSecondaryRegionCondition
+              - Name: BuildLayer2ndRegion
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CodeBuild
+                Configuration:
+                  ProjectName: !Ref LambdaLayerProject
+                  PrimarySource: SourceArtifact
+                  EnvironmentVariables:
+                    Fn::Sub:
+                      - >
+                        [
+                          {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
+                          {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
+                          {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
+                          {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
+                        ]
+                      - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+                        KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+                InputArtifacts:
+                  - Name: SourceArtifact
+                OutputArtifacts:
+                  - Name: LambdaLayerArtifact2nd
+              - !Ref AWS::NoValue
 
         - Fn::If:
           - EnableStage1Condition
@@ -341,10 +377,6 @@ Resources:
             Actions:
               - Name: Deploy
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -378,7 +410,45 @@ Resources:
                     - CommonLayerName: !Select [0, !Ref LayerNames]
                   OutputFileName: stack-output.json
               - Fn::If:
-                - ConfirmStageTransitionConditon
+                - UseSecondaryRegionCondition
+                - Name: Deploy2ndRegion
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount1Condition
+                    - !Sub
+                      - arn:aws:iam::${Account1}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: LambdaLayerArtifact2nd
+                  OutputArtifacts:
+                    - Name: DevStackOutput2nd
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn: !If
+                      - CrossAccount1Condition
+                      - !Sub
+                        - arn:aws:iam::${Account1}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                    StackName: !Select [0, !Ref StackNames]
+                    TemplatePath: LambdaLayerArtifact2nd::packaged.yaml
+                    TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
+                    ParameterOverrides: !Sub
+                      - >
+                        {"CommonLayerName": "${CommonLayerName}" }
+                      - CommonLayerName: !Select [0, !Ref LayerNames]
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
+              - Fn::If:
+                - ConfirmStageTransitionCondition
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -398,10 +468,6 @@ Resources:
             Actions:
               - Name: Deploy
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -435,7 +501,45 @@ Resources:
                     - CommonLayerName: !Select [1, !Ref LayerNames]
                   OutputFileName: stack-output.json
               - Fn::If:
-                - ConfirmStageTransitionConditon
+                - UseSecondaryRegionCondition
+                - Name: Deploy2ndRegion
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount2Condition
+                    - !Sub
+                      - arn:aws:iam::${Account2}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: LambdaLayerArtifact2nd
+                  OutputArtifacts:
+                    - Name: TestStackOutput2nd
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn: !If
+                      - CrossAccount2Condition
+                      - !Sub
+                        - arn:aws:iam::${Account2}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                    StackName: !Select [1, !Ref StackNames]
+                    TemplatePath: LambdaLayerArtifact2nd::packaged.yaml
+                    TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
+                    ParameterOverrides: !Sub
+                      - >
+                        { "CommonLayerName": "${CommonLayerName}" }
+                      - CommonLayerName: !Select [1, !Ref LayerNames]
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
+              - Fn::If:
+                - ConfirmStageTransitionCondition
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -455,10 +559,6 @@ Resources:
             Actions:
               - Name: Deploy
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -491,6 +591,44 @@ Resources:
                       { "CommonLayerName": "${CommonLayerName}" }
                     - CommonLayerName: !Select [2, !Ref LayerNames]
                   OutputFileName: stack-output.json
+              - Fn::If:
+                - UseSecondaryRegionCondition
+                - Name: Deploy2ndRegion
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount3Condition
+                    - !Sub
+                      - arn:aws:iam::${Account3}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: LambdaLayerArtifact2nd
+                  OutputArtifacts:
+                    - Name: ProdStackOutput2nd
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn: !If
+                      - CrossAccount3Condition
+                      - !Sub
+                        - arn:aws:iam::${Account3}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: "CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND"
+                    StackName: !Select [2, !Ref StackNames]
+                    TemplatePath: LambdaLayerArtifact2nd::packaged.yaml
+                    TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
+                    ParameterOverrides: !Sub
+                      - >
+                        { "CommonLayerName": "${CommonLayerName}" }
+                      - CommonLayerName: !Select [2, !Ref LayerNames]
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
   #
@@ -510,7 +648,7 @@ Resources:
                 - !Sub
                   - "arn:aws:s3:::${BUCKET_NAME}/${PREFIX}"
                   - BUCKET_NAME: !If
-                      - UseDefaultSourceBucketConditon
+                      - UseDefaultSourceBucketCondition
                       - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                       - !Ref SourceBucket
                     PREFIX: !Ref SourcePrefix
@@ -531,7 +669,7 @@ Resources:
           requestParameters:
             bucketName:
               - !If
-                - UseDefaultSourceBucketConditon
+                - UseDefaultSourceBucketCondition
                 - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                 - !Ref SourceBucket
             key:
