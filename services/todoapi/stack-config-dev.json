@@ -1,6 +1,5 @@
 {
   "Parameters": {
-    "LogLevel": "DEBUG"
   },
   "Tags": {
     "Environment": "Develop"
