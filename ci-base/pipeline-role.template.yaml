@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Shared CodePipeline and CodeBuild roles to break circular dependency for cross region pre-requests.
+
+Resources:
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub codepipeline.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub codebuild.${AWS::URLSuffix}
+            Action:
+              - sts:AssumeRole
+
+Outputs:
+
+  CodePipelineServiceRole:
+    Description: CodePipeline role
+    Value: !Ref CodePipelineServiceRole
+    Export:
+      Name: !Sub ${AWS::StackName}:CodePipelineServiceRole
+
+  CodePipelineServiceRoleArn:
+    Description: CodePipeline role ARN
+    Value: !GetAtt CodePipelineServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CodePipelineServiceRoleArn
+
+  CodeBuildServiceRole:
+    Description: CodeBuild role ARN
+    Value: !Ref CodeBuildServiceRole
+    Export:
+      Name: !Sub ${AWS::StackName}:CodeBuildServiceRole
+
+  CodeBuildServiceRoleArn:
+    Description: CodeBuild role ARN
+    Value: !GetAtt CodeBuildServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:CodeBuildServiceRoleArn

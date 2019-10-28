@@ -55,6 +55,16 @@ Parameters:
     AllowedPattern: "[A-Za-z][A-Za-z0-9]*"
     ConstraintDescription: Only alphanumeric string is allowed.
 
+  CodePipelineServiceRole:
+    Description: >
+      CodePipelineServiceRole name in primary account, created by pipeline-role stack.
+    Type: String
+
+  CodeBuildServiceRole:
+    Description: >
+      CodeBuildServiceRole name in primary account, created by pipeline-role stack.
+    Type: String
+
   PrimaryRegion:
     Description: >
       Primary region for the pipelines, if this is not the same region as the PreReq stack
@@ -108,6 +118,8 @@ Metadata:
           default: Project Configuration
         Parameters:
           - ProjectIdentifier
+          - CodePipelineServiceRole
+          - CodeBuildServiceRole
           - PermissionsBoundary
       - Label:
           default: Account Configuration
@@ -122,12 +134,13 @@ Metadata:
           - SecondaryRegion
           - SecondaryArtifactBucket
           - SecondaryKMSKey
-      - Label:
-          default: Misc
-        Parameters:
     ParameterLabels:
       ProjectIdentifier:
         default: Project Identifier
+      CodePipelineServiceRole:
+        default: CodePipeline Service Role
+      CodeBuildServiceRole:
+        default: CodeBuild Service Role
       PermissionsBoundary:
         default: Permissions Boundary
       Account1:
@@ -204,11 +217,12 @@ Resources:
             Effect: Allow
             Principal:
               AWS:
+                - !Ref AWS::AccountId
                 - !If [ EnableStage1Condition, !Sub "arn:aws:iam::${Account1}:root", !Ref "AWS::NoValue" ]
                 - !If [ EnableStage2Condition, !Sub "arn:aws:iam::${Account2}:root", !Ref "AWS::NoValue" ]
                 - !If [ EnableStage3Condition, !Sub "arn:aws:iam::${Account3}:root", !Ref "AWS::NoValue" ]
-                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectIdentifier}-CodeBuildServiceRole"
-                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectIdentifier}-CodePipelineServiceRole"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${CodePipelineServiceRole}"
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${CodeBuildServiceRole}"
             Action:
               - kms:Encrypt
               - kms:Decrypt
@@ -363,35 +377,6 @@ Resources:
   #
   # Roles
   #
-  CodePipelineServiceRole:
-    Condition: IsPrimaryRegionConditon
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${ProjectIdentifier}-CodePipelineServiceRole
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub codepipeline.${AWS::URLSuffix}
-            Action:
-              - sts:AssumeRole
-      Path: /
-
-  CodeBuildServiceRole:
-    Condition: IsPrimaryRegionConditon
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${ProjectIdentifier}-CodeBuildServiceRole
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub codebuild.${AWS::URLSuffix}
-            Action:
-              - sts:AssumeRole
-      Path: /
 
   # See https://docs.aws.amazon.com/codepipeline/latest/userguide/how-to-custom-role.html#view-default-service-role-policy
   CodePipelineCannedPolicy:
@@ -612,7 +597,7 @@ Resources:
 
   CloudFormationDeployRole:
     Condition: IsPrimaryRegionConditon
-    Type: "AWS::IAM::Role"
+    Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -639,12 +624,6 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}:ProjectIdentifier
 
-#  KmsKeyId:
-#    Description: KMS Key ID
-#    Value: !Ref KMSKey
-#    Export:
-#      Name: !Sub ${AWS::StackName}:KmsKeyId
-
   KmsKeyArn:
     Description: KMS Key ARN
     Value: !GetAtt KMSKey.Arn
@@ -663,7 +642,7 @@ Outputs:
     Value: !Ref SourceBucket
     Export:
       Name: !Sub ${AWS::StackName}:SourceBucket
-      
+
   SourceBucketArn:
     Condition: IsPrimaryRegionConditon
     Description: Source bucket arn
@@ -677,7 +656,7 @@ Outputs:
     Value: !Ref CloudTrailBucket
     Export:
       Name: !Sub ${AWS::StackName}:CloudTrailBucket
-      
+
   CloudTrailBucketArn:
     Condition: IsPrimaryRegionConditon
     Description: CloudTrail bucket arn
@@ -697,19 +676,19 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}:ArtifactBucketArn
 
-  CodePipelineRoleArn:
+  CodePipelineServiceRoleArn:
     Condition: IsPrimaryRegionConditon
-    Description: CodePipeline role ARN
-    Value: !GetAtt CodePipelineServiceRole.Arn
+    Description: CodePipeline service role ARN
+    Value: !Sub "arn:aws:iam::${AWS::AccountId}:role/${CodePipelineServiceRole}"
     Export:
-      Name: !Sub ${AWS::StackName}:CodePipelineRoleArn
+      Name: !Sub ${AWS::StackName}:CodePipelineServiceRoleArn
 
-  CodeBuildRoleArn:
+  CodeBuildServiceRoleArn:
     Condition: IsPrimaryRegionConditon
-    Description: CodeBuild role ARN
-    Value: !GetAtt CodeBuildServiceRole.Arn
+    Description: CodeBuild service role ARN
+    Value: !Sub "arn:aws:iam::${AWS::AccountId}:role/${CodeBuildServiceRole}"
     Export:
-      Name: !Sub ${AWS::StackName}:CodeBuildRoleArn
+      Name: !Sub ${AWS::StackName}:CodeBuildServiceRoleArn
 
   CloudFormationDeployRoleArn:
     Condition: IsPrimaryRegionConditon

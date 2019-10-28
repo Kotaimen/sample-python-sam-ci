@@ -179,7 +179,7 @@ Conditions:
   #Misc
   UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
   ConfirmStageTransitionConditon: !Equals [!Ref ConfirmStageTransition, "yes"]
-  BlockLastStageCondition: !Equals [!Ref BlockLastStage, "yes"]
+  BlockLastStageCondition: !And [!Condition EnableStage3Condition, !Equals [!Ref BlockLastStage, "yes"]]
   UseSecondaryRegionConditon: !Equals [!Ref DeployToRegion, "Secondary"]
 
 Resources:
@@ -188,7 +188,7 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: Build Lambda Layers
-      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildRoleArn" }
+      ServiceRole: { "Fn::ImportValue": !Sub "${PreReqStack}:CodeBuildServiceRoleArn" }
       TimeoutInMinutes: 30
       EncryptionKey: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
       Artifacts:
@@ -254,7 +254,7 @@ Resources:
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineRoleArn" }
+      RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineServiceRoleArn" }
       ArtifactStores:
         - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:PrimaryRegion" }
           ArtifactStore:
