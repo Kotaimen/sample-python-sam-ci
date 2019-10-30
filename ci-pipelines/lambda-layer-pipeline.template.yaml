@@ -29,6 +29,14 @@ Parameters:
     MinLength: 1
     MaxLength: 256
 
+  PollS3Change:
+    Type: String
+    Description: >
+      Whether to poll for s3 changes or use CloudTrail S3 events to trigger the Pipeline.
+      Trigger is prefered by AWS but each region can only have 5 trails.
+    Default: "yes"
+    AllowedValues: ["yes", "no"]
+
   Account1:
     Description: >
       AWS AccountNumber for stage 1.
@@ -185,6 +193,7 @@ Conditions:
   EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
 
   # Misc
+  DisableS3PollCondition: !Not [!Equals [!Ref PollS3Change, "yes"]]
   NamedPipelineCondition: !Not [!Equals [!Ref PipelineName, ""]]
   UseDefaultSourceBucketCondition: !Equals [!Ref SourceBucket, ""]
   ConfirmStageTransitionCondition: !Equals [!Ref ConfirmStageTransition, "yes"]
@@ -311,7 +320,10 @@ Resources:
                   - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                   - !Ref SourceBucket
                 S3ObjectKey: !Ref SourcePrefix
-                PollForSourceChanges: false
+                PollForSourceChanges: !If
+                  - DisableS3PollCondition
+                  - false
+                  - true
               OutputArtifacts:
                 - Name: SourceArtifact
 
@@ -636,6 +648,7 @@ Resources:
   #
   S3CloudTrail:
     Type: AWS::CloudTrail::Trail
+    Condition: DisableS3PollCondition
     Properties:
       IsLogging: true
       S3BucketName: { "Fn::ImportValue": !Sub "${PreReqStack}:CloudTrailBucket" }
@@ -655,6 +668,7 @@ Resources:
 
   S3ObjectCreatedEventsRule:
     Type: AWS::Events::Rule
+    Condition: DisableS3PollCondition
     Properties:
       Description: "S3.PutObject for CodePipeline source file"
       State: ENABLED
@@ -682,6 +696,7 @@ Resources:
 
   EventsCallPipelineRole:
     Type: AWS::IAM::Role
+    Condition: DisableS3PollCondition
     Properties:
       AssumeRolePolicyDocument:
         Statement:
