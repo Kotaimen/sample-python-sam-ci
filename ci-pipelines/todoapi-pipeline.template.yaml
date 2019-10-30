@@ -29,6 +29,14 @@ Parameters:
     MinLength: 1
     MaxLength: 256
 
+  PollS3Change:
+    Type: String
+    Description: >
+      Whether to poll for s3 changes or use CloudTrail S3 events to trigger the Pipeline.
+      Trigger is prefered by AWS but each region can only have 5 trails.
+    Default: "yes"
+    AllowedValues: ["yes", "no"]
+
   Account1:
     Description: >
       AWS AccountNumber for stage 1.
@@ -68,12 +76,18 @@ Parameters:
     AllowedPattern: "[0-9]*"
     ConstraintDescription: Must be numberic string or empty.
 
-  DeployToRegion:
+  PipelineName:
     Description: >
-      Deploy to specified region, note secondary region will only work when the PreReq are setup properly.
+      Name of the pipeline being created, by default a random name is generated
     Type: String
-    Default: Primary
-    AllowedValues: [Primary, Secondary]
+    Default: ""
+
+  UseSecondaryRegion:
+    Description: >
+      Deploy to secondary region, note secondary region will only work when the PreReq are setup properly.
+    Type: String
+    Default: "no"
+    AllowedValues: ["yes", "no"]
 
   StageNames:
     Description: >
@@ -142,11 +156,13 @@ Metadata:
       - Label:
           default: Pipeline Behaviour
         Parameters:
+          - PipelineName
           - StageNames
-          - DeployToRegion
+          - UseSecondaryRegion
           - ConfirmStageTransition
           - BlockLastStage
           - StackUpdateActionMode
+          - PollS3Change
       - Label:
           default: Stack Configuration
         Parameters:
@@ -166,16 +182,20 @@ Metadata:
         default: Account 2
       Account3:
         default: Account 3
+      PipelineName:
+        default: Pipeline Name
       StageNames:
         default: Stage Names
-      DeployToRegion:
-        default: Deploy to Region
+      UseSecondaryRegion:
+        default: Use Secondary Region
       ConfirmStageTransition:
         default: Confirm Stage Transition
       StackUpdateActionMode:
         default: Stack Update Action Mode
       BlockLastStage:
         default: Block Last Stage
+      PollS3Change:
+        default: Poll S3 Change
       LambdaLayerNames:
         default: Lambda Layer Names
       LambdaLayerVersions:
@@ -193,31 +213,33 @@ Conditions:
   EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
   EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
 
-  #Misc
-  UseDefaultSourceBucketConditon: !Equals [!Ref SourceBucket, ""]
-  ConfirmStageTransitionConditon: !Equals [!Ref ConfirmStageTransition, "yes"]
+  # Misc
+  DisableS3PollCondition: !Not [!Equals [!Ref PollS3Change, "yes"]]
+  NamedPipelineCondition: !Not [!Equals [!Ref PipelineName, ""]]
+  UseDefaultSourceBucketCondition: !Equals [!Ref SourceBucket, ""]
+  ConfirmStageTransitionCondition: !Equals [!Ref ConfirmStageTransition, "yes"]
   BlockLastStageCondition: !And [!Condition EnableStage3Condition, !Equals [!Ref BlockLastStage, "yes"]]
-  UseSecondaryRegionConditon: !Equals [!Ref DeployToRegion, "Secondary"]
+  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
 
 Mappings:
 
   StackConfig:
     Develop:
       Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
-      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
-      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-dev.json
+      TemplatePath: services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: services/todoapi/stack-config-dev.json
     Test:
       Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
-      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
-      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-test.json
+      TemplatePath: services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: services/todoapi/stack-config-test.json
 #    Staging:
 #      Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
-#      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
-#      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-staging.json
+#      TemplatePath: services/todoapi/.aws-sam/build/packaged.yaml
+#      TemplateConfiguration: services/todoapi/stack-config-staging.json
     Production:
       Capabilities: CAPABILITY_IAM
-      TemplatePath: PackagedArtifact::services/todoapi/.aws-sam/build/packaged.yaml
-      TemplateConfiguration: PackagedArtifact::services/todoapi/stack-config-prod.json
+      TemplatePath: services/todoapi/.aws-sam/build/packaged.yaml
+      TemplateConfiguration: services/todoapi/stack-config-prod.json
 
 Resources:
 
@@ -342,6 +364,11 @@ Resources:
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
+      Name:
+        Fn::If:
+          - NamedPipelineCondition
+          - !Ref PipelineName
+          - !Ref AWS::NoValue
       RoleArn: { "Fn::ImportValue": !Sub "${PreReqStack}:CodePipelineServiceRoleArn" }
       ArtifactStores:
         - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:PrimaryRegion" }
@@ -352,7 +379,7 @@ Resources:
               Type: KMS
               Id: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
         - Fn::If:
-          - UseSecondaryRegionConditon
+          - UseSecondaryRegionCondition
           - Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
             ArtifactStore:
               Type: S3
@@ -381,11 +408,14 @@ Resources:
                 Provider: S3
               Configuration:
                 S3Bucket: !If
-                  - UseDefaultSourceBucketConditon
+                  - UseDefaultSourceBucketCondition
                   - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                   - !Ref SourceBucket
                 S3ObjectKey: !Ref SourcePrefix
-                PollForSourceChanges: false
+                PollForSourceChanges: !If
+                  - DisableS3PollCondition
+                  - false
+                  - true
               OutputArtifacts:
                 - Name: SourceArtifact
 
@@ -445,7 +475,7 @@ Resources:
 
         - Name: Build
           Actions:
-            - Name: BuildAndPackage
+            - Name: CfnBuild
               RunOrder: 1
               ActionTypeId:
                 Category: Build
@@ -466,18 +496,41 @@ Resources:
                         {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
 
                       ]
-                    - TEMPLATE_BUCKET: !If
-                        - UseSecondaryRegionConditon
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-                      KMS_KEY_ARN: !If
-                        - UseSecondaryRegionConditon
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
-                        - { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+                    - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+                      KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: PackagedArtifact
+            - Fn::If:
+              - UseSecondaryRegionCondition
+              - Name: CfnBuild2ndRegion
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CodeBuild
+                Configuration:
+                  ProjectName: !Ref BuildProject
+                  PrimarySource: SourceArtifact
+                  EnvironmentVariables:
+                    Fn::Sub:
+                      - >
+                        [
+                          {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                          {"name": "MAKE_TAREGET", "value": "build", "type": "PLAINTEXT"},
+                          {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
+                          {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
+                          {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
+                        ]
+                      - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+                        KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+                InputArtifacts:
+                  - Name: SourceArtifact
+                OutputArtifacts:
+                  - Name: PackagedArtifact2nd
+              - !Ref AWS::NoValue
 
         - Fn::If:
           - EnableStage1Condition
@@ -485,10 +538,6 @@ Resources:
             Actions:
               - Name: Deploy
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -514,19 +563,63 @@ Resources:
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: !FindInMap [StackConfig, Develop, Capabilities]
                   StackName: !Select [0, !Ref StackNames]
-                  TemplatePath: !FindInMap [StackConfig, Develop, TemplatePath]
-                  TemplateConfiguration: !FindInMap [StackConfig, Develop, TemplateConfiguration]
+                  TemplatePath: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Develop, TemplatePath]] ]
+                  TemplateConfiguration: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Develop, TemplateConfiguration]] ]
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${Account1}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account1}:layer:${NAME}:${VERSION}",
                         "LogLevel": "DEBUG"
                       }
                     - NAME: !Select [0, !Ref LambdaLayerNames]
                       VERSION: !Select [0, !Ref LambdaLayerVersions]
+                      REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
               - Fn::If:
-                - ConfirmStageTransitionConditon
+                - UseSecondaryRegionCondition
+                - Name: Deploy2ndRegion
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount1Condition
+                    - !Sub
+                      - arn:aws:iam::${Account1}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: PackagedArtifact2nd
+                  OutputArtifacts:
+                    - Name: TodoApiDevStackOutput2nd
+                  Configuration:
+                    ActionMode: !Ref StackUpdateActionMode
+                    RoleArn: !If
+                      - CrossAccount1Condition
+                      - !Sub
+                        - arn:aws:iam::${Account1}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: !FindInMap [StackConfig, Develop, Capabilities]
+                    StackName: !Select [0, !Ref StackNames]
+                    TemplatePath: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Develop, TemplatePath]] ]
+                    TemplateConfiguration: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Develop, TemplateConfiguration]] ]
+                    ParameterOverrides: !Sub
+                      - >
+                        {
+                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account1}:layer:${NAME}:${VERSION}",
+                          "LogLevel": "DEBUG"
+                        }
+                      - NAME: !Select [0, !Ref LambdaLayerNames]
+                        VERSION: !Select [0, !Ref LambdaLayerVersions]
+                        REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
+              - Fn::If:
+                - ConfirmStageTransitionCondition
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -546,10 +639,6 @@ Resources:
             Actions:
               - Name: Deploy
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -575,19 +664,63 @@ Resources:
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: !FindInMap [StackConfig, Test, Capabilities]
                   StackName: !Select [1, !Ref StackNames]
-                  TemplatePath: !FindInMap [StackConfig, Test, TemplatePath]
-                  TemplateConfiguration: !FindInMap [StackConfig, Test, TemplateConfiguration]
+                  TemplatePath: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Test, TemplatePath]] ]
+                  TemplateConfiguration: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Test, TemplateConfiguration]] ]
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${Account2}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account2}:layer:${NAME}:${VERSION}",
                         "LogLevel": "DEBUG"
                       }
                     - NAME: !Select [1, !Ref LambdaLayerNames]
                       VERSION: !Select [1, !Ref LambdaLayerVersions]
+                      REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
               - Fn::If:
-                - ConfirmStageTransitionConditon
+                - UseSecondaryRegionCondition
+                - Name: Deploy2ndRegion
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount2Condition
+                    - !Sub
+                      - arn:aws:iam::${Account2}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: PackagedArtifact2nd
+                  OutputArtifacts:
+                    - Name: TodoApiTestStackOutput2nd
+                  Configuration:
+                    ActionMode: !Ref StackUpdateActionMode
+                    RoleArn: !If
+                      - CrossAccount2Condition
+                      - !Sub
+                        - arn:aws:iam::${Account2}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: !FindInMap [StackConfig, Test, Capabilities]
+                    StackName: !Select [1, !Ref StackNames]
+                    TemplatePath: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Test, TemplatePath]] ]
+                    TemplateConfiguration: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Test, TemplateConfiguration]] ]
+                    ParameterOverrides: !Sub
+                      - >
+                        {
+                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account2}:layer:${NAME}:${VERSION}",
+                          "LogLevel": "DEBUG"
+                        }
+                      - NAME: !Select [1, !Ref LambdaLayerNames]
+                        VERSION: !Select [1, !Ref LambdaLayerVersions]
+                        REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
+              - Fn::If:
+                - ConfirmStageTransitionCondition
                 - Name: Review
                   RunOrder: 2
                   ActionTypeId:
@@ -607,10 +740,6 @@ Resources:
             Actions:
               - Name: CreateChangeSet
                 RunOrder: 1
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -635,17 +764,60 @@ Resources:
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
                   Capabilities: !FindInMap [StackConfig, Production, Capabilities]
                   StackName: !Select [2, !Ref StackNames]
-                  TemplatePath: !FindInMap [StackConfig, Production, TemplatePath]
-                  TemplateConfiguration: !FindInMap [StackConfig, Production, TemplateConfiguration]
+                  TemplatePath: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Production, TemplatePath]] ]
+                  TemplateConfiguration: !Join [ "::", ["PackagedArtifact", !FindInMap [StackConfig, Production, TemplateConfiguration]] ]
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${AWS::Region}:${Account3}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account3}:layer:${NAME}:${VERSION}",
                         "LogLevel": "INFO"
                       }
                     - NAME: !Select [2, !Ref LambdaLayerNames]
                       VERSION: !Select [2, !Ref LambdaLayerVersions]
+                      REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
+              - Fn::If:
+                - UseSecondaryRegionCondition
+                - Name: CreateChangeSet2nd
+                  RunOrder: 1
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount3Condition
+                    - !Sub
+                      - arn:aws:iam::${Account3}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  InputArtifacts:
+                    - Name: PackagedArtifact2nd
+                  Configuration:
+                    ChangeSetName: !Sub ${AWS::StackName}-todoapi
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn: !If
+                      - CrossAccount3Condition
+                      - !Sub
+                        - arn:aws:iam::${Account3}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    Capabilities: !FindInMap [StackConfig, Production, Capabilities]
+                    StackName: !Select [2, !Ref StackNames]
+                    TemplatePath: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Production, TemplatePath]] ]
+                    TemplateConfiguration: !Join [ "::", ["PackagedArtifact2nd", !FindInMap [StackConfig, Production, TemplateConfiguration]] ]
+                    ParameterOverrides: !Sub
+                      - >
+                        {
+                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account3}:layer:${NAME}:${VERSION}",
+                          "LogLevel": "INFO"
+                        }
+                      - NAME: !Select [2, !Ref LambdaLayerNames]
+                        VERSION: !Select [2, !Ref LambdaLayerVersions]
+                        REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
 
               - Name: ReviewChangeSet
                 RunOrder: 2
@@ -660,10 +832,6 @@ Resources:
 
               - Name: ExecuteChangeSet
                 RunOrder: 3
-                Region: !If
-                  - UseSecondaryRegionConditon
-                  - { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
-                  - !Ref AWS::NoValue
                 ActionTypeId:
                   Category: Deploy
                   Owner: AWS
@@ -686,8 +854,38 @@ Resources:
                       - arn:aws:iam::${Account3}:role/${ProjectName}-CloudFormationDeployRole
                       - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
-                  StackName: !Select [3, !Ref StackNames]
+                  StackName: !Select [2, !Ref StackNames]
                   OutputFileName: stack-output.json
+              - Fn::If:
+                - UseSecondaryRegionCondition
+                - Name: ExecuteChangeSet2nd
+                  RunOrder: 3
+                  Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  RoleArn: !If
+                    - CrossAccount3Condition
+                    - !Sub
+                      - arn:aws:iam::${Account3}:role/${ProjectName}-CrossAccountRole
+                      - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                    - !Ref AWS::NoValue
+                  OutputArtifacts:
+                    - Name: TodoApiProductionStackOutput2nd
+                  Configuration:
+                    ChangeSetName: !Sub ${AWS::StackName}-todoapi
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn: !If
+                      - CrossAccount3Condition
+                      - !Sub
+                        - arn:aws:iam::${Account3}:role/${ProjectName}-CloudFormationDeployRole
+                        - ProjectName: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      - { "Fn::ImportValue": !Sub "${PreReqStack}:CloudFormationDeployRoleArn" }
+                    StackName: !Select [2, !Ref StackNames]
+                    OutputFileName: stack-output.json
+                - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
   #
@@ -695,6 +893,7 @@ Resources:
   #
   S3CloudTrail:
     Type: AWS::CloudTrail::Trail
+    Condition: DisableS3PollCondition
     Properties:
       IsLogging: true
       S3BucketName: { "Fn::ImportValue": !Sub "${PreReqStack}:CloudTrailBucket" }
@@ -707,13 +906,14 @@ Resources:
                 - !Sub
                   - "arn:aws:s3:::${BUCKET_NAME}/${PREFIX}"
                   - BUCKET_NAME: !If
-                      - UseDefaultSourceBucketConditon
+                      - UseDefaultSourceBucketCondition
                       - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                       - !Ref SourceBucket
                     PREFIX: !Ref SourcePrefix
 
   S3ObjectCreatedEventsRule:
     Type: AWS::Events::Rule
+    Condition: DisableS3PollCondition
     Properties:
       Description: "S3.PutObject for CodePipeline source file"
       State: ENABLED
@@ -728,7 +928,7 @@ Resources:
           requestParameters:
             bucketName:
               - !If
-                - UseDefaultSourceBucketConditon
+                - UseDefaultSourceBucketCondition
                 - { "Fn::ImportValue": !Sub "${PreReqStack}:SourceBucket" }
                 - !Ref SourceBucket
             key:
@@ -741,6 +941,7 @@ Resources:
 
   EventsCallPipelineRole:
     Type: AWS::IAM::Role
+    Condition: DisableS3PollCondition
     Properties:
       AssumeRolePolicyDocument:
         Statement:
@@ -766,7 +967,3 @@ Outputs:
     Description: CodePipeline Name
     Value: !Ref Pipeline
 
-  StackNames:
-    Description: Stak Names
-    Value:
-      {  "Fn::Sub": ['arn', {}  ] }
