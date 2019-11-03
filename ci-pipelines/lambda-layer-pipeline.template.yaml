@@ -144,9 +144,10 @@ Metadata:
         Parameters:
           - PipelineName
           - StageNames
-          - DeployToRegion
+          - UseSecondaryRegion
           - ConfirmStageTransition
           - BlockLastStage
+          - PollS3Change
       - Label:
           default: Stack Configuration
         Parameters:
@@ -169,12 +170,14 @@ Metadata:
         default: Pipeline Name
       StageNames:
         default: Stage Names
-      DeployToRegion:
-        default: Deploy to Region
+      UseSecondaryRegion:
+        default: Use Secondary Region
       ConfirmStageTransition:
         default: Confirm Stage Transition
       BlockLastStage:
         default: Block Last Stage
+      PollS3Change:
+        default: Poll S3 Change
       StackNames:
         default: Stack Names
       LayerNames:
