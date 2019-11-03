@@ -1,21 +1,21 @@
 -i https://pypi.org/simple
 appdirs==1.4.3
-arrow==0.15.2
+arrow==0.15.4
 atomicwrites==1.3.0
-attrs==19.2.0
-aws-lambda-builders==0.4.0
-aws-sam-cli==0.22.0
-aws-sam-translator==1.14.0
-awscfncli2==2.1.18
-awscli==1.16.258
-backports.functools-lru-cache==1.5
+attrs==19.3.0
+aws-lambda-builders==0.5.0
+aws-sam-cli==0.30.0
+aws-sam-translator==1.15.1
+awscfncli2==2.1.19
+awscli==1.16.272
+backports.functools-lru-cache==1.6.1
 bandit==1.6.2
 binaryornot==0.4.4
-black==19.3b0
-boto3==1.9.248
-botocore==1.12.248
+black==19.10b0
+boto3==1.10.8
+botocore==1.13.8
 certifi==2019.9.11
-cfn-lint==0.24.4
+cfn-lint==0.24.8
 chardet==3.0.4
 chevron==0.13.1
 click==7.0
@@ -29,11 +29,11 @@ docopt==0.6.2
 docutils==0.15.2
 entrypoints==0.3
 flake8-bugbear==19.8.0
-flake8==3.7.8
+flake8==3.7.9
 flask==1.1.1
-future==0.18.0
+future==0.18.2
 gitdb2==2.0.6
-gitpython==3.0.3
+gitpython==3.0.4
 idna==2.8
 importlib-metadata==0.23
 itsdangerous==1.1.0
@@ -48,6 +48,7 @@ mccabe==0.6.1
 mock==3.0.5
 more-itertools==7.2.0
 paho-mqtt==1.3.1
+pathspec==0.6.0
 pbr==5.4.3
 pluggy==0.13.0
 poyo==0.5.0
@@ -57,17 +58,17 @@ pycodestyle==2.5.0
 pyflakes==2.1.1
 pyjwt==1.7.1
 pykwalify==1.7.0
-pyrsistent==0.15.4
+pyrsistent==0.15.5
 pytest-cov==2.8.1
 pytest-dotenv==0.4.0
-pytest-mock==1.11.1
+pytest-mock==1.11.2
 pytest==4.5.0
 python-box==3.4.5
-python-dateutil==2.8.0 ; python_version >= '2.7'
+python-dateutil==2.8.1 ; python_version >= '2.7'
 python-dotenv==0.10.3
 pytz==2019.3
 pyyaml==5.1.2 ; python_version != '2.6' and python_version != '3.3'
-regex==2019.8.19
+regex==2019.11.1
 requests==2.22.0
 rsa==3.4.2
 s3transfer==0.2.1
@@ -77,6 +78,7 @@ smmap2==2.0.5
 stevedore==1.31.0
 tavern==0.30.3
 toml==0.10.0
+typed-ast==1.4.0
 tzlocal==2.0.0
 urllib3==1.25.6 ; python_version >= '3.4'
 wcwidth==0.1.7

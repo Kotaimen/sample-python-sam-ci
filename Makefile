@@ -16,8 +16,6 @@ clean:
 	@$(PIPENV) clean
 	@$(MAKE) -C services clean
 
-
-
 #
 # Pipenv
 #
@@ -75,5 +73,37 @@ format:
 
 define HELP_MESSAGE
 
-todo...
+env
+  Boostrap/update enviroment.
+
+update
+  Update docker and pipenv environment.
+
+layers:
+  Build lambda layers.
+
+build
+  Build lambda functions.
+
+package
+  Package CloudFormation templates, requires following enviroment variables:
+    TEMPLATE_BUCKET: s3 bucket to write packaged resources.
+    TEMPLATE_PREFIX: s3 prefix to write packaged resources.
+    KMS_KEYARN: KMS key to encrypt resources.
+
+test
+  Run unittest on lambda functions.
+
+coverage
+  Run code coverage using unittests.
+
+lint
+  Run code lint on lambda functions.
+
+cfn-lint
+  CloudFormation template lint.
+
+format
+  Format code using Black.
+
 endef
