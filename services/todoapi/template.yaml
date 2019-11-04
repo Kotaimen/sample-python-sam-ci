@@ -70,3 +70,8 @@ Resources:
       PrimaryKey:
         Name: id
         Type: String
+
+Outputs:
+    ApiURL:
+      Description: "API endpoint URL for Prod environment"
+      Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/v1/todos/"
