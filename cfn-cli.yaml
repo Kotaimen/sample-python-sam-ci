@@ -30,7 +30,7 @@ Stages:
       Capabilities: [CAPABILITY_IAM]
       Parameters:
         ProjectIdentifier: solder100
-        Account1: "<accound-id>"
+        Account1: "<account-id>"
         PrimaryRegion: us-east-1
         CodePipelineServiceRole: ${CIBase.PipelineRole.CodePipelineServiceRole}
         CodeBuildServiceRole: ${CIBase.PipelineRole.CodeBuildServiceRole}

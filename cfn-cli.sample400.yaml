@@ -1,0 +1,163 @@
+Version: 3
+
+# Level 400 sample: cross region, cross account, multiple stages
+# Project identifier: "solder400"
+
+Blueprints:
+
+  Tools:
+    Profile: <tools-profile>
+    Region: us-east-1
+    Tags:
+      Environment: Develop
+
+  Test:
+    Profile: <test-profile>
+    Region: us-east-1
+    Tags:
+      Environment: Test
+
+  Prod:
+    Profile: <prod-profile>
+    Region: us-east-1
+    Tags:
+      Environment: Prod
+
+Stages:
+
+  CIBase:
+    Order: 1
+
+    PipelineRole:
+      Extends: Tools
+      Order: 1
+      StackName: solder400ci-role
+      Template: ci-base/pipeline-role.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+
+    PreReq2nd:
+      Extends: Tools
+      Region: us-west-2
+      Order: 2
+      StackName: solder400ci-prereq
+      Template: ci-base/prereq.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        ProjectIdentifier: solder400
+        Account1: "<tools-account>"
+        Account2: "<test-account>"
+        Account3: "<prod-account>"
+        PrimaryRegion: us-east-1
+        CodePipelineServiceRole: ${CIBase.PipelineRole.CodePipelineServiceRole}
+        CodeBuildServiceRole: ${CIBase.PipelineRole.CodeBuildServiceRole}
+
+    PreReq:
+      Extends: Tools
+      Order: 3
+      StackName: solder400ci-prereq
+      Template: ci-base/prereq.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        ProjectIdentifier: solder400
+        Account1: "<tools-account>"
+        Account2: "<test-account>"
+        Account3: "<prod-account>"
+        PrimaryRegion: us-east-1
+        CodePipelineServiceRole: ${CIBase.PipelineRole.CodePipelineServiceRole}
+        CodeBuildServiceRole: ${CIBase.PipelineRole.CodeBuildServiceRole}
+        SecondaryRegion: us-west-2
+        SecondaryArtifactBucket: ${CIBase.PreReq2nd.ArtifactBucket}
+        SecondaryKMSKey: ${CIBase.PreReq2nd.KmsKeyArn}
+
+    TestAccountRole:
+      Extends: Test
+      Order: 10
+      StackName: solder400ci-role
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        ProjectIdentifier: solder400
+        ToolsAccount: "<tools-account>"
+        ArtifactBuckets: >
+          ${CIBase.PreReq.ArtifactBucket},
+          ${CIBase.PreReq2nd.ArtifactBucket}
+        KmsKeyArns: >
+          ${CIBase.PreReq.KmsKeyArn},
+          ${CIBase.PreReq2nd.KmsKeyArn}
+        AdditonalRegions: 1
+        PermissionsBoundary: ""
+
+    ProdAccountRole:
+      Extends: Prod
+      Order: 11
+      StackName: solder400ci-role
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        ProjectIdentifier: solder400
+        ToolsAccount: "<tools-account>"
+        ArtifactBuckets: >
+          ${CIBase.PreReq.ArtifactBucket},
+          ${CIBase.PreReq2nd.ArtifactBucket}
+        KmsKeyArns: >
+          ${CIBase.PreReq.KmsKeyArn},
+          ${CIBase.PreReq2nd.KmsKeyArn}
+        AdditonalRegions: 1
+        PermissionsBoundary: ""
+
+  Pipelines:
+    Order: 10
+    Layers:
+      Extends: Tools
+      StackName: solder400ci-pipeline-layers
+      Template: ci-pipelines/lambda-layer-pipeline.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        PreReqStack: ${CIBase.PreReq.StackName}
+        SourcePrefix: source.zip
+        PipelineName: Solder400-CrossAccountCrossRegionLambdaLayer
+        StageNames: QA,Staging,Prod
+        ConfirmStageTransition: "no"
+        BlockLastStage: "no"
+        UseSecondaryRegion: "yes"
+        Account1: "<tools-account>"
+        Account2: "<test-account>"
+        Account3: "<prod-account>"
+        StackNames: >
+          solder400-layers-test,
+          solder400-layers-staging,
+          solder400-layers-prod,
+        LayerNames: >
+          Solder400CommonPy37-test,
+          Solder400CommonPy37-staging,
+          Solder400CommonPy37-prod
+
+    TodoApi:
+      Extends: Tools
+      StackName: solder400ci-pipeline-todoapi
+      Template: ci-pipelines/todoapi-pipeline.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        PreReqStack: ${CIBase.PreReq.StackName}
+        SourcePrefix: source.zip
+        PipelineName: Solder400-CrossAccountCrossRegionTodoApi
+        StageNames: QA,Staging,Prod
+        ConfirmStageTransition: "yes"
+        BlockLastStage: "no"
+        UseSecondaryRegion: "yes"
+        Account1: "<tools-account>"
+        Account2: "<test-account>"
+        Account3: "<prod-account>"
+        StackNames: >
+          solder400-todoapi-test,
+          solder400-todoapi-staging,
+          solder400-todiapi-prod,
+        LambdaLayerNames: >
+          Solder400CommonPy37-test,
+          Solder400CommonPy37-staging,
+          Solder400CommonPy37-prod
+        LambdaLayerVersions: >
+          1,
+          1,
+          1
+
