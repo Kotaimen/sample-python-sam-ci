@@ -99,6 +99,8 @@ Resources:
                 - !Sub arn:aws:iam::${ToolsAccount}:root
             Action:
               - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkFullAccess
       Path: /
 
   CrossAccountPolicy:
@@ -112,7 +114,26 @@ Resources:
             Action:
               - cloudformation:*
               - s3:*
+              - codecommit:BatchGetRepositories
+              - codecommit:Get*
+              - codecommit:GitPull
+              - codecommit:List*
+              - codecommit:CancelUploadArchive
+              - codecommit:UploadArchive
+              - codecommit:GetRepositoryTriggers
+              - codecommit:PutRepositoryTriggers
+              - codecommit:TestRepositoryTriggers
+            Resource: "*"
+          - Action:
               - iam:PassRole
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - !Sub cloudformation.${AWS::URLSuffix}
+                  - !Sub elasticbeanstalk.${AWS::URLSuffix}
+                  - !Sub ec2.${AWS::URLSuffix}
+                  - !Sub ecs-tasks.${AWS::URLSuffix}
+            Effect: Allow
             Resource: "*"
           - Effect: Allow
             Action:
@@ -140,7 +161,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - cloudformation.amazonaws.com
+                - !Sub cloudformation.${AWS::URLSuffix}
             Action:
               - sts:AssumeRole
       Path: /
