@@ -426,6 +426,7 @@ Resources:
               - cloudformation:*
               - rds:*
               - sqs:*
+              - logs:*
               - ecs:*
             Effect: Allow
             Resource: "*"
