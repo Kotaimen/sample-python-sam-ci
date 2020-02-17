@@ -16,7 +16,7 @@ coverage = ">=4.5.4"
 bandit = ">=1.6.2"
 mock = ">=3.0.5"
 cfn-lint = ">=0.24.0"
-aws-sam-cli = ">=0.30.0"
+aws-sam-cli = ">=0.39.0"
 awscfncli2 = ">=2.1.19"
 awscli = ">=1.16.0"
 black = "*" # XXX: black still in "pre-release".
@@ -42,7 +42,7 @@ aws-wsgi = "*"
 todoapi = {editable = true,path = "./src/todoapi"}
 
 [requires]
-python_version = "3.7"
+python_version = "3.7,3.8"
 
 [pipenv]
 allow_prereleases = true
