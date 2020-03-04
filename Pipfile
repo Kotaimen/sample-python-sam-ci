@@ -19,7 +19,6 @@ cfn-lint = ">=0.24.0"
 aws-sam-cli = ">=0.39.0"
 awscfncli2 = ">=2.1.19"
 awscli = ">=1.16.0"
-black = "*" # XXX: black still in "pre-release".
 
 [packages]
 #
@@ -45,4 +44,4 @@ todoapi = {editable = true,path = "./src/todoapi"}
 python_version = "3.7,3.8"
 
 [pipenv]
-allow_prereleases = true
+allow_prereleases = false
