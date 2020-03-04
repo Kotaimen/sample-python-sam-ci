@@ -1,11 +1,8 @@
-#TEMPLATE_BUCKET=samdemo-prereq-artifactbucket-eq2mr518p3dq
-#TEMPLATE_PREFIX=codebuild-packaged-templates
-#KMS_KEY_ARN=arn:aws:kms:us-east-1:877602539438:key/1a1157aa-d9ed-4b01-b1b2-b7c0baae0843
-
-
 all: package
 
 .PHONY: clean package layers build
+
+LAMBDA_RUNTIME ?= python3.7
 
 clean:
 	rm -rf build
@@ -18,6 +15,7 @@ build/common-layer.md5: common-layer/requirements.txt
 	mkdir -p build
 	md5sum $< | cut -f 1 -d " " > $@
 
+# XXX: lambci python version should come from env variable
 build/common-layer.zip: common-layer/build.sh build/common-layer.md5
 	# Mounted directories:
 	# - /var/task: build source, aka this file and requirements.txt
@@ -27,13 +25,13 @@ build/common-layer.zip: common-layer/build.sh build/common-layer.md5
 		-v $(CURDIR)/common-layer/:/var/task/:ro \
 		-v $(CURDIR)/build/:/tmp/build/ \
 		-w /tmp/build/ \
-		lambci/lambda:build-python3.7 \
+		lambci/lambda:build-${LAMBDA_RUNTIME} \
 		bash /var/task/build.sh
 
 build: build/common-layer.zip
 
 package: build
 	sam package --output-template-file build/packaged.yaml \
-		--s3-bucket ${TEMPLATE_BUCKET} \
-		--s3-prefix ${TEMPLATE_PREFIX} \
-		--kms-key-id ${KMS_KEY_ARN}
+		--s3-bucket ${S3_BUCKET} \
+		--s3-prefix ${S3_PREFIX} \
+		--kms-key-id ${KMS_KEY_ID}

@@ -2,41 +2,83 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Description: >
-  Shared common lambda layers
+  Shared lambda layers. Note old layers are retained during update.
 
 Parameters:
+
   OrganizationId:
     Description: >
       Grant permission to all accounts in the specified organization, leave
       blank disables cross-organization share.
     Type: String
     Default: ''
+    AllowedPattern: "[a-zA-Z0-9]*"
 
   CommonLayerName:
     Description: >
-      Common lambda layer name.
+      Name of common lambda layer.
     Type: String
     Default: circuit-common-layer-py37
+
+  SsmPrefix:
+    Description: Prefix of SSM parameter names, without ending "/".
+    Default: /Dev/Common
+    Type: String
+    AllowedPattern: "(/[a-zA-Z0-9-]+)+"
+
+  LambdaRuntime:
+    Description: >
+      Lambda runtime for the layers.
+    Type: String
+    Default: "python3.8"
+    AllowedValues: ["python3.7", "python3.8"]
 
 Conditions:
 
   CrossOrgPermissionCondition:
     !Not [!Equals [!Ref OrganizationId, '']]
 
+  # XXX SAM doesn't allow this as of Mar-2020:
+  # Layer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Properties:
+  #     CompatibleRuntimes:
+  #      - !Sub "${LambdaRuntime}"
+  Py37Condition: !Equals [ !Ref LambdaRuntime, "python3.7"]
+  Py38Condition: !Equals [ !Ref LambdaRuntime, "python3.8"]
+
 Resources:
 
-  CommonLayer:
+  CommonLayer37:
     Type: AWS::Serverless::LayerVersion
+    Condition: Py37Condition
     Properties:
       LayerName: !Ref CommonLayerName
       ContentUri: build/common-layer.zip
       CompatibleRuntimes:
         - python3.7
       RetentionPolicy: Retain
+      # Use hash of requirements.txt as layer identifier
       "Fn::Transform":
         Name: "AWS::Include"
         Parameters:
           Location: build/common-layer.yaml
+
+  CommonLayer38:
+    Type: AWS::Serverless::LayerVersion
+    Condition: Py38Condition
+    Properties:
+      LayerName: !Ref CommonLayerName
+      ContentUri: build/common-layer.zip
+      CompatibleRuntimes:
+        - python3.8
+      RetentionPolicy: Retain
+      # Use hash of requirements.txt as layer identifier
+      "Fn::Transform":
+        Name: "AWS::Include"
+        Parameters:
+          Location: build/common-layer.yaml
+
 
   CommonLayerPermission:
     Type: AWS::Lambda::LayerVersionPermission
@@ -44,32 +86,42 @@ Resources:
     DeletionPolicy: Retain
     Properties:
       Action: lambda:GetLayerVersion
-      LayerVersionArn: !Ref CommonLayer
+      LayerVersionArn: !If
+        - Py37Condition
+        - !Ref CommonLayer37
+        - !Ref CommonLayer38
       OrganizationId: !Ref OrganizationId
       Principal: '*'
 
+  #
+  # Outputs as SSM parameter
+  #
+
+  CommonLayerArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: RDS secret
+      Type: String
+      Tier: Intelligent-Tiering
+      Name: !Sub ${SsmPrefix}/CommonLayerArn
+      Value: !If
+        - Py37Condition
+        - !Ref CommonLayer37
+        - !Ref CommonLayer38
+
 Outputs:
+
   StackName:
     Description: Name of the current stack
     Value: !Ref AWS::StackName
 
   CommonLayerArn:
-    Description: Common layer ARN for Python runtime
-    Value: !Ref CommonLayer
-    Export:
-      Name: !Sub ${AWS::StackName}:Py37CommonLayerArn
+    Description: CommonLayer ARN
+    Value: !If
+      - Py37Condition
+      - !Ref CommonLayer37
+      - !Ref CommonLayer38
 
-  # How name & version is extracted:
-  #
-  # arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:{name}:{version}
-  #  0   1     2          3                4           5    6       7
-
-  CommonLayerName:
-    Description: Common shared layer name for Python runtime
-    Value:
-      "Fn::Select": [ 6, { "Fn::Split": [ ':', Ref: CommonLayer ] } ]
-
-  CommonLayerVersion:
-    Description: Common shared layer version for Python runtime
-    Value:
-      "Fn::Select": [ 7, { "Fn::Split": [ ':', Ref: CommonLayer ] } ]
+  CommonLayerArnParameter:
+    Description: CommonLayer SSM Parameter
+    Value: !Ref CommonLayerArnParameter
