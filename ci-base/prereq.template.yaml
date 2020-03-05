@@ -46,8 +46,8 @@ Parameters:
 
   ProjectIdentifier:
     Description: >
-      An unique identifier for the project, this parameter must be set to identical value
-      for role stacks and pipeline stacks.
+      An unique identifier for the project, used to break dependency between stacks.
+      Note its not recommended to change this after pipeline stacks are deployed.
     Type: String
     Default: samwise
     MinLength: 1
@@ -68,7 +68,7 @@ Parameters:
   PrimaryRegion:
     Description: >
       Primary region for the pipelines, if this is not the same region as the PreReq stack
-      being deployed to,  only ArtifactBucket and KMS key will be created.
+      being deployed to, only ArtifactBucket and KMS key will be created.
     Type: String
     Default: us-east-1
     AllowedValues: [
@@ -366,9 +366,16 @@ Resources:
           Principal:
             AWS:
               - !Ref AWS::AccountId
-              - !If [ EnableStage1Condition, !Ref Account1, !Ref "AWS::NoValue" ]
-              - !If [ EnableStage2Condition, !Ref Account2, !Ref "AWS::NoValue" ]
-              - !If [ EnableStage3Condition, !Ref Account3, !Ref "AWS::NoValue" ]
+#              - !If [ EnableStage1Condition, !Ref Account1, !Ref "AWS::NoValue" ]
+#              - !If [ EnableStage2Condition, !Ref Account2, !Ref "AWS::NoValue" ]
+#              - !If [ EnableStage3Condition, !Ref Account3, !Ref "AWS::NoValue" ]
+          Action: sns:Publish
+          Resource: !Ref NotificationTopic
+        - Sid: SNSCodePipelineAccessPolicy
+          Effect: Allow
+          Principal:
+            Service:
+              - codestar-notifications.amazonaws.com
           Action: sns:Publish
           Resource: !Ref NotificationTopic
       Topics:
