@@ -33,7 +33,7 @@ Parameters:
     Type: String
     Description: >
       Whether to poll for s3 changes or use CloudTrail S3 events to trigger the Pipeline.
-      Trigger is prefered by AWS but each region can only have 5 trails.
+      Trigger is preferred by AWS but each region can only have 5 trails.
     Default: "yes"
     AllowedValues: ["yes", "no"]
 
@@ -110,19 +110,27 @@ Parameters:
     Default: "no"
     AllowedValues: ["yes", "no"]
 
-  LayerNames:
-    Description: >
-      Name of the lambda layer in each stages, separated by ",", unused stages can be ignored.
-      Eg: "Dev", "Dev,Test" or "_,Test,Prod".
-    Type: CommaDelimitedList
-    Default: layer-name
-
   StackNames:
     Description: >
       Name of the lambda layer stack in each stages, separated by ",", unused stages can be ignored.
       Eg: "Dev", "Dev,Test" or "_,Test,Prod".
     Type: CommaDelimitedList
     Default: stack-name
+
+  CommonLayerIdentifier:
+    Description: >
+      Common layer identifier which will be used to generate common lambda layer name.  Full lambda layer names is
+      "${ProjectIdentifier}-${CommonLayerIdentifier}-${StageName}"
+    Type: String
+    Default: commonlayer
+    AllowedPattern: "[a-zA-Z0-9-_]+"
+
+  LambdaRuntime:
+    Description: >
+      Lambda runtime of the layers being built.
+    Type: String
+    Default: "python3.8"
+    AllowedValues: ["python3.7", "python3.8"]
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -152,7 +160,7 @@ Metadata:
           default: Stack Configuration
         Parameters:
           - StackNames
-          - LayerNames
+          - LambdaRuntime
     ParameterLabels:
       PreReqStack:
         default: PreRequests Stack
@@ -180,20 +188,26 @@ Metadata:
         default: Poll S3 Change
       StackNames:
         default: Stack Names
-      LayerNames:
-        default: Layer Names
+      LambdaRuntime:
+        default: Lambda Runtime
 
 
 Conditions:
-  #  Detect "same account" situation
+  # Detect which stages are cross account deployed
   CrossAccount1Condition: !Not [!Equals [!Ref Account1, !Ref "AWS::AccountId"]]
   CrossAccount2Condition: !Not [!Equals [!Ref Account2, !Ref "AWS::AccountId"]]
   CrossAccount3Condition: !Not [!Equals [!Ref Account3, !Ref "AWS::AccountId"]]
 
-  # Stages to enable
+  # Detect stages to deploy
   EnableStage1Condition: !Not [!Equals [!Ref Account1, ""]]
   EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
   EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
+
+  # Detect secondary stages to deploy
+  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
+  EnableStage1SecondaryRegionCondition: !And [ !Condition EnableStage1Condition, !Condition UseSecondaryRegionCondition ]
+  EnableStage2SecondaryRegionCondition: !And [ !Condition EnableStage2Condition, !Condition UseSecondaryRegionCondition ]
+  EnableStage3SecondaryRegionCondition: !And [ !Condition EnableStage3Condition, !Condition UseSecondaryRegionCondition ]
 
   # Misc
   DisableS3PollCondition: !Not [!Equals [!Ref PollS3Change, "yes"]]
@@ -201,7 +215,6 @@ Conditions:
   UseDefaultSourceBucketCondition: !Equals [!Ref SourceBucket, ""]
   ConfirmStageTransitionCondition: !Equals [!Ref ConfirmStageTransition, "yes"]
   BlockLastStageCondition: !And [!Condition EnableStage3Condition, !Equals [!Ref BlockLastStage, "yes"]]
-  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
 
 Resources:
 
@@ -217,7 +230,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:2.0
         PrivilegedMode: true
       Cache:
         Type: S3
@@ -235,13 +248,10 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.7
+                python: 3.8
                 docker: 18
               commands:
                 - echo Entered the install phase...
-                - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 --storage-driver=overlay&
-                - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
-                - docker pull lambci/lambda:build-python3.7
                 - pip3 install -r requirements-dev.txt
               finally:
                 - echo Leaving install phase...
@@ -342,17 +352,17 @@ Resources:
               Configuration:
                 ProjectName: !Ref LambdaLayerProject
                 PrimarySource: SourceArtifact
-                EnvironmentVariables:
-                  Fn::Sub:
-                    - >
-                      [
-                        {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
-                        {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
-                        {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
-                        {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
-                      ]
-                    - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-                      KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+                EnvironmentVariables: !Sub
+                  - >
+                    [
+                      {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
+                      {"name": "S3_BUCKET", "value": "${S3_BUCKET}", "type": "PLAINTEXT"},
+                      {"name": "S3_PREFIX", "value": "codebuild-packaged", "type": "PLAINTEXT"},
+                      {"name": "KMS_KEY_ID", "value": "${KMS_KEY_ID}", "type": "PLAINTEXT"},
+                      {"name": "LAMBDA_RUNTIME", "value": "${LambdaRuntime}", "type": "PLAINTEXT"}
+                    ]
+                  - S3_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+                    KMS_KEY_ID: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
@@ -369,17 +379,17 @@ Resources:
                 Configuration:
                   ProjectName: !Ref LambdaLayerProject
                   PrimarySource: SourceArtifact
-                  EnvironmentVariables:
-                    Fn::Sub:
-                      - >
-                        [
-                          {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
-                          {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
-                          {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
-                          {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
-                        ]
-                      - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
-                        KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+                  EnvironmentVariables: !Sub
+                    - >
+                      [
+                        {"name": "WORKDIR", "value": "infra/lambda-layers/", "type": "PLAINTEXT"},
+                        {"name": "S3_BUCKET", "value": "${S3_BUCKET}", "type": "PLAINTEXT"},
+                        {"name": "S3_PREFIX", "value": "codebuild-packaged", "type": "PLAINTEXT"},
+                        {"name": "KMS_KEY_ID", "value": "${KMS_KEY_ID}", "type": "PLAINTEXT"},
+                        {"name": "LAMBDA_RUNTIME", "value": "${LambdaRuntime}", "type": "PLAINTEXT"}
+                      ]
+                    - S3_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+                      KMS_KEY_ID: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
                 InputArtifacts:
                   - Name: SourceArtifact
                 OutputArtifacts:
@@ -388,7 +398,7 @@ Resources:
 
         - Fn::If:
           - EnableStage1Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
@@ -421,8 +431,19 @@ Resources:
                   TemplateConfiguration: LambdaLayerArtifact::stack-config.json
                   ParameterOverrides: !Sub
                     - >
-                      {"CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [0, !Ref LayerNames]
+                      {
+                        "CommonLayerName": "${COMMON_LAYER_NAME}",
+                        "SsmPrefix": "${SSM_PREFIX}",
+                        "LambdaRuntime": "${LambdaRuntime}"
+                      }
+                    - COMMON_LAYER_NAME: !Sub
+                        - "${PROJECT}-commonlayer-${STAGE}"
+                        - STAGE: !Select [0, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      SSM_PREFIX: !Sub
+                        - "/${STAGE}/${PROJECT}/Layers"
+                        - STAGE: !Select [0, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   OutputFileName: stack-output.json
               - Fn::If:
                 - UseSecondaryRegionCondition
@@ -458,8 +479,19 @@ Resources:
                     TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
                     ParameterOverrides: !Sub
                       - >
-                        {"CommonLayerName": "${CommonLayerName}" }
-                      - CommonLayerName: !Select [0, !Ref LayerNames]
+                        {
+                          "CommonLayerName": "${COMMON_LAYER_NAME}",
+                          "SsmPrefix": "${SSM_PREFIX}",
+                          "LambdaRuntime": "${LambdaRuntime}"
+                        }
+                      - COMMON_LAYER_NAME: !Sub
+                          - "${PROJECT}-commonlayer-${STAGE}"
+                          - STAGE: !Select [0, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                        SSM_PREFIX: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers"
+                          - STAGE: !Select [0, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
               - Fn::If:
@@ -479,7 +511,7 @@ Resources:
 
         - Fn::If:
           - EnableStage2Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 1, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 1, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
@@ -512,8 +544,19 @@ Resources:
                   TemplateConfiguration: LambdaLayerArtifact::stack-config.json
                   ParameterOverrides: !Sub
                     - >
-                      { "CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [1, !Ref LayerNames]
+                      {
+                      "CommonLayerName": "${COMMON_LAYER_NAME}",
+                      "SsmPrefix": "${SSM_PREFIX}",
+                      "LambdaRuntime": "${LambdaRuntime}"
+                      }
+                    - COMMON_LAYER_NAME: !Sub
+                        - "${PROJECT}-commonlayer-${STAGE}"
+                        - STAGE: !Select [1, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      SSM_PREFIX: !Sub
+                        - "/${STAGE}/${PROJECT}/Layers"
+                        - STAGE: !Select [1, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   OutputFileName: stack-output.json
               - Fn::If:
                 - UseSecondaryRegionCondition
@@ -549,8 +592,19 @@ Resources:
                     TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
                     ParameterOverrides: !Sub
                       - >
-                        { "CommonLayerName": "${CommonLayerName}" }
-                      - CommonLayerName: !Select [1, !Ref LayerNames]
+                        {
+                          "CommonLayerName": "${COMMON_LAYER_NAME}",
+                          "SsmPrefix": "${SSM_PREFIX}",
+                          "LambdaRuntime": "${LambdaRuntime}"
+                        }
+                      - COMMON_LAYER_NAME: !Sub
+                          - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+                          - STAGE: !Select [1, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                        SSM_PREFIX: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers"
+                          - STAGE: !Select [1, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
               - Fn::If:
@@ -570,7 +624,7 @@ Resources:
 
         - Fn::If:
           - EnableStage3Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
@@ -603,8 +657,19 @@ Resources:
                   TemplateConfiguration: LambdaLayerArtifact::stack-config.json
                   ParameterOverrides: !Sub
                     - >
-                      { "CommonLayerName": "${CommonLayerName}" }
-                    - CommonLayerName: !Select [2, !Ref LayerNames]
+                      {
+                      "CommonLayerName": "${COMMON_LAYER_NAME}",
+                      "SsmPrefix": "${SSM_PREFIX}",
+                      "LambdaRuntime": "${LambdaRuntime}"
+                      }
+                    - COMMON_LAYER_NAME: !Sub
+                        - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+                        - STAGE: !Select [2, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                      SSM_PREFIX: !Sub
+                        - "/${STAGE}/${PROJECT}/Layers"
+                        - STAGE: !Select [2, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                   OutputFileName: stack-output.json
               - Fn::If:
                 - UseSecondaryRegionCondition
@@ -640,8 +705,19 @@ Resources:
                     TemplateConfiguration: LambdaLayerArtifact2nd::stack-config.json
                     ParameterOverrides: !Sub
                       - >
-                        { "CommonLayerName": "${CommonLayerName}" }
-                      - CommonLayerName: !Select [2, !Ref LayerNames]
+                        {
+                          "CommonLayerName": "${COMMON_LAYER_NAME}",
+                          "SsmPrefix": "${SSM_PREFIX}",
+                          "LambdaRuntime": "${LambdaRuntime}"
+                        }
+                      - COMMON_LAYER_NAME: !Sub
+                          - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+                          - STAGE: !Select [2, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+                        SSM_PREFIX: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers"
+                          - STAGE: !Select [2, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
@@ -724,3 +800,51 @@ Outputs:
   Pipeline:
     Description: CodePipeline Name
     Value: !Ref Pipeline
+
+  Stage1CommonLayerName:
+    Description: Common lambda layer name in stage 1 primary region
+    Condition: EnableStage1Condition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [0, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+
+  Stage1SecondaryRegionCommonLayerName:
+    Description: Common lambda layer name in stage 1 secondary region
+    Condition: EnableStage1SecondaryRegionCondition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [0, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+
+  Stage2CommonLayerName:
+    Description: Common lambda layer name in stage 2 primary region
+    Condition: EnableStage2Condition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [1, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+
+  Stage2SecondaryRegionCommonLayerName:
+    Description: Common lambda layer name in stage 2 secondary region
+    Condition: EnableStage2SecondaryRegionCondition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [1, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+
+  Stage3CommonLayerName:
+    Description: Common lambda layer name in stage 3 primary region
+    Condition: EnableStage3Condition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [2, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
+
+  Stage3SecondaryRegionCommonLayerName:
+    Description: Common lambda layer name in stage 3 secondary region
+    Condition: EnableStage3SecondaryRegionCondition
+    Value: !Sub
+      - "${PROJECT}-${CommonLayerIdentifier}-${STAGE}"
+      - STAGE: !Select [2, !Ref StageNames]
+        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
