@@ -33,7 +33,7 @@ Parameters:
     Type: String
     Description: >
       Whether to poll for s3 changes or use CloudTrail S3 events to trigger the Pipeline.
-      Trigger is prefered by AWS but each region can only have 5 trails.
+      Trigger is preferred by AWS but each region can only have 5 trails.
     Default: "yes"
     AllowedValues: ["yes", "no"]
 
@@ -124,20 +124,6 @@ Parameters:
     Type: CommaDelimitedList
     Default: stack-name
 
-  LambdaLayerNames:
-    Description: >
-      Name of the lambda layer in each stages, separated by ",", unused stages can be ignored.
-      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
-    Type: CommaDelimitedList
-    Default: layer-name
-
-  LambdaLayerVersions:
-    Description: >
-      Version of the lambda layer in each stages, separated by ",", unused stages can be ignored.
-      Eg: "Dev", "Dev,Test" or "_,Test,_,Prod".
-    Type: CommaDelimitedList
-    Default: "1"
-
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -167,8 +153,6 @@ Metadata:
           default: Stack Configuration
         Parameters:
           - StackNames
-          - LambdaLayerNames
-          - LambdaLayerVersions
     ParameterLabels:
       PreReqStack:
         default: PreRequests Stack
@@ -196,22 +180,23 @@ Metadata:
         default: Block Last Stage
       PollS3Change:
         default: Poll S3 Change
-      LambdaLayerNames:
-        default: Lambda Layer Names
-      LambdaLayerVersions:
-        default: Lambda Layer Versions
-
 
 Conditions:
-  #  Detect "same account" situation
+  # Detect which stages are cross account deployed
   CrossAccount1Condition: !Not [!Equals [!Ref Account1, !Ref "AWS::AccountId"]]
   CrossAccount2Condition: !Not [!Equals [!Ref Account2, !Ref "AWS::AccountId"]]
   CrossAccount3Condition: !Not [!Equals [!Ref Account3, !Ref "AWS::AccountId"]]
 
-  # Stages to enable
+  # Detect stages to deploy
   EnableStage1Condition: !Not [!Equals [!Ref Account1, ""]]
   EnableStage2Condition: !Not [!Equals [!Ref Account2, ""]]
   EnableStage3Condition: !Not [!Equals [!Ref Account3, ""]]
+
+  # Detect secondary stages to deploy
+  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
+  EnableStage1SecondaryRegionCondition: !And [ !Condition EnableStage1Condition, !Condition UseSecondaryRegionCondition ]
+  EnableStage2SecondaryRegionCondition: !And [ !Condition EnableStage2Condition, !Condition UseSecondaryRegionCondition ]
+  EnableStage3SecondaryRegionCondition: !And [ !Condition EnableStage3Condition, !Condition UseSecondaryRegionCondition ]
 
   # Misc
   DisableS3PollCondition: !Not [!Equals [!Ref PollS3Change, "yes"]]
@@ -219,7 +204,6 @@ Conditions:
   UseDefaultSourceBucketCondition: !Equals [!Ref SourceBucket, ""]
   ConfirmStageTransitionCondition: !Equals [!Ref ConfirmStageTransition, "yes"]
   BlockLastStageCondition: !And [!Condition EnableStage3Condition, !Equals [!Ref BlockLastStage, "yes"]]
-  UseSecondaryRegionCondition: !Equals [!Ref UseSecondaryRegion, "yes"]
 
 Mappings:
 
@@ -255,7 +239,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:2.0
         PrivilegedMode: true
       Cache:
         Type: S3
@@ -273,21 +257,18 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.7
-                docker: 18
+                python: 3.8
+                docker: latest
               commands:
                 - echo Entered the install phase...
-                - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 --storage-driver=overlay&
-                - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
-                - docker pull amazon/dynamodb-local
                 - pip3 install -r requirements-dev.txt -r requirements.txt
               finally:
                 - echo Leaving install phase...
             pre_build:
               commands:
                 - echo Entered the pre_build phase...
-                - docker run -d -p 8000:8000 amazon/dynamodb-local
                 - cd ${WORKDIR}
+                - docker run -d -p 8000:8000 amazon/dynamodb-local
               finally:
                 - echo Leaving pre_build phrase..
             build:
@@ -317,7 +298,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:2.0
         PrivilegedMode: true
       Cache:
         Type: S3
@@ -331,7 +312,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.7
+                python: 3.8
               commands:
                 - echo Entered the install phase...
                 - pip3 install -r requirements-dev.txt
@@ -392,7 +373,7 @@ Resources:
       DisableInboundStageTransitions:
         Fn::If:
           - BlockLastStageCondition
-          - - StageName: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
+          - - StageName: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
               Reason: "Disabled transition"
           - !Ref AWS::NoValue
       Stages:
@@ -475,7 +456,7 @@ Resources:
 
         - Name: Build
           Actions:
-            - Name: CfnBuild
+            - Name: Build
               RunOrder: 1
               ActionTypeId:
                 Category: Build
@@ -485,26 +466,23 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
                 PrimarySource: SourceArtifact
-                EnvironmentVariables:
-                  Fn::Sub:
-                    - >
-                      [
-                        {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
-                        {"name": "MAKE_TAREGET", "value": "build", "type": "PLAINTEXT"},
-                        {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
-                        {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
-                        {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
-
-                      ]
-                    - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
-                      KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
+                EnvironmentVariables: !Sub
+                  - >
+                    [
+                      {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                      {"name": "S3_BUCKET", "value": "${S3_BUCKET}", "type": "PLAINTEXT"},
+                      {"name": "S3_PREFIX", "value": "codebuild-packaged", "type": "PLAINTEXT"},
+                      {"name": "KMS_KEY_ID", "value": "${KMS_KEY_ID}", "type": "PLAINTEXT"}
+                    ]
+                  - S3_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:ArtifactBucket" }
+                    KMS_KEY_ID: { "Fn::ImportValue": !Sub "${PreReqStack}:KmsKeyArn" }
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: PackagedArtifact
             - Fn::If:
               - UseSecondaryRegionCondition
-              - Name: CfnBuild2ndRegion
+              - Name: Build2ndRegion
                 RunOrder: 1
                 ActionTypeId:
                   Category: Build
@@ -514,18 +492,16 @@ Resources:
                 Configuration:
                   ProjectName: !Ref BuildProject
                   PrimarySource: SourceArtifact
-                  EnvironmentVariables:
-                    Fn::Sub:
-                      - >
-                        [
-                          {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
-                          {"name": "MAKE_TAREGET", "value": "build", "type": "PLAINTEXT"},
-                          {"name": "TEMPLATE_BUCKET", "value": "${TEMPLATE_BUCKET}", "type": "PLAINTEXT"},
-                          {"name": "TEMPLATE_PREFIX", "value": "codebuild-packaged-templates", "type": "PLAINTEXT"},
-                          {"name": "KMS_KEY_ARN", "value": "${KMS_KEY_ARN}", "type": "PLAINTEXT"}
-                        ]
-                      - TEMPLATE_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
-                        KMS_KEY_ARN: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
+                  EnvironmentVariables: !Sub
+                    - >
+                      [
+                        {"name": "WORKDIR", "value": ".", "type": "PLAINTEXT"},
+                        {"name": "S3_BUCKET", "value": "${S3_BUCKET}", "type": "PLAINTEXT"},
+                        {"name": "S3_PREFIX", "value": "codebuild-packaged", "type": "PLAINTEXT"},
+                        {"name": "KMS_KEY_ID", "value": "${KMS_KEY_ID}", "type": "PLAINTEXT"}
+                      ]
+                    - S3_BUCKET: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryArtifactBucket" }
+                      KMS_KEY_ID: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryKmsKeyArn" }
                 InputArtifacts:
                   - Name: SourceArtifact
                 OutputArtifacts:
@@ -534,7 +510,7 @@ Resources:
 
         - Fn::If:
           - EnableStage1Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
@@ -568,11 +544,13 @@ Resources:
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account1}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                         "LogLevel": "DEBUG"
                       }
-                    - NAME: !Select [0, !Ref LambdaLayerNames]
-                      VERSION: !Select [0, !Ref LambdaLayerVersions]
+                    - COMMON_LAYER_ARN_PARAM: !Sub
+                      - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                      - STAGE: !Select [0, !Ref StageNames]
+                        PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                       REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
               - Fn::If:
@@ -610,11 +588,13 @@ Resources:
                     ParameterOverrides: !Sub
                       - >
                         {
-                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account1}:layer:${NAME}:${VERSION}",
+                          "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                           "LogLevel": "DEBUG"
                         }
-                      - NAME: !Select [0, !Ref LambdaLayerNames]
-                        VERSION: !Select [0, !Ref LambdaLayerVersions]
+                      - COMMON_LAYER_ARN_PARAM: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                          - STAGE: !Select [0, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                         REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
@@ -628,14 +608,13 @@ Resources:
                     Version: "1"
                     Provider: Manual
                   Configuration:
-                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
                     CustomData: !Sub [ "Review ${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
         - Fn::If:
           - EnableStage2Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 1, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 1, !Ref StageNames ] } ]
             Actions:
               - Name: Deploy
                 RunOrder: 1
@@ -669,11 +648,13 @@ Resources:
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account2}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                         "LogLevel": "DEBUG"
                       }
-                    - NAME: !Select [1, !Ref LambdaLayerNames]
-                      VERSION: !Select [1, !Ref LambdaLayerVersions]
+                    - COMMON_LAYER_ARN_PARAM: !Sub
+                        - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                        - STAGE: !Select [1, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                       REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
               - Fn::If:
@@ -711,11 +692,13 @@ Resources:
                     ParameterOverrides: !Sub
                       - >
                         {
-                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account2}:layer:${NAME}:${VERSION}",
+                          "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                           "LogLevel": "DEBUG"
                         }
-                      - NAME: !Select [1, !Ref LambdaLayerNames]
-                        VERSION: !Select [1, !Ref LambdaLayerVersions]
+                      - COMMON_LAYER_ARN_PARAM: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                          - STAGE: !Select [1, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                         REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
@@ -729,14 +712,13 @@ Resources:
                     Version: "1"
                     Provider: Manual
                   Configuration:
-                    NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
                     CustomData: !Sub [ "Review ${STAGE_NAME}", { STAGE_NAME: !Select [ 0, !Ref StageNames ] } ]
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
 
         - Fn::If:
           - EnableStage3Condition
-          - Name: !Sub [ "DeployTo${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
+          - Name: !Sub [ "Deploy2${STAGE_NAME}", { STAGE_NAME: !Select [ 2, !Ref StageNames ] } ]
             Actions:
               - Name: CreateChangeSet
                 RunOrder: 1
@@ -769,16 +751,18 @@ Resources:
                   ParameterOverrides: !Sub
                     - >
                       {
-                        "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account3}:layer:${NAME}:${VERSION}",
+                        "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                         "LogLevel": "INFO"
                       }
-                    - NAME: !Select [2, !Ref LambdaLayerNames]
-                      VERSION: !Select [2, !Ref LambdaLayerVersions]
+                    - COMMON_LAYER_ARN_PARAM: !Sub
+                        - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                        - STAGE: !Select [2, !Ref StageNames]
+                          PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                       REGION: !Ref AWS::Region
                   OutputFileName: stack-output.json
               - Fn::If:
                 - UseSecondaryRegionCondition
-                - Name: CreateChangeSet2nd
+                - Name: CreateChangeSet2ndRegion
                   RunOrder: 1
                   Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
                   ActionTypeId:
@@ -810,11 +794,13 @@ Resources:
                     ParameterOverrides: !Sub
                       - >
                         {
-                          "CommonLayerArn": "arn:aws:lambda:${REGION}:${Account3}:layer:${NAME}:${VERSION}",
+                          "CommonLayerArnParameter": "${COMMON_LAYER_ARN_PARAM}",
                           "LogLevel": "INFO"
                         }
-                      - NAME: !Select [2, !Ref LambdaLayerNames]
-                        VERSION: !Select [2, !Ref LambdaLayerVersions]
+                      - COMMON_LAYER_ARN_PARAM: !Sub
+                          - "/${STAGE}/${PROJECT}/Layers/CommonLayerArn"
+                          - STAGE: !Select [2, !Ref StageNames]
+                            PROJECT: { "Fn::ImportValue": !Sub "${PreReqStack}:ProjectIdentifier" }
                         REGION: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
@@ -827,7 +813,6 @@ Resources:
                   Version: "1"
                   Provider: Manual
                 Configuration:
-                  NotificationArn: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
                   CustomData: Review ChangeSet
 
               - Name: ExecuteChangeSet
@@ -858,7 +843,7 @@ Resources:
                   OutputFileName: stack-output.json
               - Fn::If:
                 - UseSecondaryRegionCondition
-                - Name: ExecuteChangeSet2nd
+                - Name: ExecuteChangeSet2ndRegion
                   RunOrder: 3
                   Region: { "Fn::ImportValue": !Sub "${PreReqStack}:SecondaryRegion" }
                   ActionTypeId:
@@ -887,6 +872,38 @@ Resources:
                     OutputFileName: stack-output.json
                 - !Ref AWS::NoValue
           - !Ref AWS::NoValue
+  #
+  # Pipeline Notification
+  #
+
+  CodeStarNotificationRule:
+    Type: AWS::CodeStarNotifications::NotificationRule
+    Properties:
+      DetailType: FULL
+      Name: !Sub "${AWS::Region} ${Pipeline} Notification Rule"
+      EventTypeIds:
+        # - codepipeline-pipeline-action-execution-canceled
+        # - codepipeline-pipeline-action-execution-failed
+        # - codepipeline-pipeline-action-execution-started
+        # - codepipeline-pipeline-action-execution-succeeded
+        # - codepipeline-pipeline-manual-approval-failed
+        - codepipeline-pipeline-manual-approval-needed
+        # - codepipeline-pipeline-manual-approval-succeeded
+        # - codepipeline-pipeline-pipeline-execution-canceled
+        - codepipeline-pipeline-pipeline-execution-failed
+        # - codepipeline-pipeline-pipeline-execution-resumed
+        # - codepipeline-pipeline-pipeline-execution-started
+        # - codepipeline-pipeline-pipeline-execution-succeeded
+        # - codepipeline-pipeline-pipeline-execution-superseded
+        # - codepipeline-pipeline-stage-execution-canceled
+        - codepipeline-pipeline-stage-execution-failed
+        # - codepipeline-pipeline-stage-execution-resumed
+        # - codepipeline-pipeline-stage-execution-started
+        # - codepipeline-pipeline-stage-execution-succeeded
+      Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+      Targets:
+        - TargetType: SNS
+          TargetAddress: { "Fn::ImportValue": { "Fn::Sub": "${PreReqStack}:NotificationTopicArn" } }
 
   #
   # S3 Pipeline Trigger

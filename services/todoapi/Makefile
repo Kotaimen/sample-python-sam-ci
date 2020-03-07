@@ -17,6 +17,6 @@ package: build
 	cd .aws-sam/build && \
 	sam package \
 		--output-template-file packaged.yaml \
-		--s3-bucket ${TEMPLATE_BUCKET} \
-		--s3-prefix ${TEMPLATE_PREFIX} \
-		--kms-key-id ${KMS_KEY_ARN}
+		--s3-bucket ${S3_BUCKET} \
+		--s3-prefix ${S3_BUCKET} \
+		--kms-key-id ${KMS_KEY_ID}
