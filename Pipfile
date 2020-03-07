@@ -32,7 +32,7 @@ requests = ">=2.22.0"
 #
 flask = "*"
 pynamodb = "*"
-flask-restplus = "*"
+flask-restx = "*"
 #marshmallow = "*"
 aws-wsgi = "*"
 #

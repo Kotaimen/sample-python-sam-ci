@@ -1,4 +1,4 @@
-from flask_restplus import Namespace, Resource, fields
+from flask_restx import Namespace, Resource, fields
 
 # XXX: It would be nice if every library just uses marshmallow ...
 from todoapi.models.todo import TodoModel
