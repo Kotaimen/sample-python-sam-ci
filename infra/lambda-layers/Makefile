@@ -15,7 +15,6 @@ build/common-layer.md5: common-layer/requirements.txt
 	mkdir -p build
 	md5sum $< | cut -f 1 -d " " > $@
 
-# XXX: lambci python version should come from env variable
 build/common-layer.zip: common-layer/build.sh build/common-layer.md5
 	# Mounted directories:
 	# - /var/task: build source, aka this file and requirements.txt
