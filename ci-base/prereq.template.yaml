@@ -307,7 +307,7 @@ Resources:
         Rules:
           - Status: Enabled
             Prefix: codebuild-cache/
-            ExpirationInDays: 7
+            ExpirationInDays: 1
 
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
