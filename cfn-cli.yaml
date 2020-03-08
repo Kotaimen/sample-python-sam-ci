@@ -1,14 +1,24 @@
 Version: 3
 
-## Level 100 sample: single region, single account, single stage
-
 Blueprints:
 
   Tools:
-    Profile: <profile-name>
+    Profile: <profile-1>
     Region: us-east-1
     Tags:
       Environment: Develop
+
+  Test:
+    Profile: <profile-2>
+    Region: us-east-1
+    Tags:
+      Environment: Test
+
+  Prod:
+    Profile: <profile-3>
+    Region: us-east-1
+    Tags:
+      Environment: Prod
 
 Stages:
 
@@ -18,51 +28,107 @@ Stages:
     PipelineRole:
       Extends: Tools
       Order: 1
-      StackName: solder100ci-roles
+      StackName: pysamci-roles
       Template: ci-base/pipeline-role.template.yaml
       Capabilities: [CAPABILITY_IAM]
 
-    PreReq:
+    PreReq2nd:
       Extends: Tools
-      Order: 3
-      StackName: solder100ci-prereq
+      Region: us-west-2
+      Order: 2
+      StackName: pysamci-prereq
       Template: ci-base/prereq.template.yaml
       Capabilities: [CAPABILITY_IAM]
       Parameters:
-        ProjectIdentifier: solder100
-        Account1: "<account-id>"
+        ProjectIdentifier: todoapi
+        Account1: "<account-1>"
+        Account2: ""
+        Account3: "<account-3>"
         PrimaryRegion: us-east-1
         CodePipelineServiceRole: ${CIBase.PipelineRole.CodePipelineServiceRole}
         CodeBuildServiceRole: ${CIBase.PipelineRole.CodeBuildServiceRole}
+
+    PreReq1st:
+      Extends: Tools
+      Order: 3
+      StackName: pysamci-prereq
+      Template: ci-base/prereq.template.yaml
+      Capabilities: [CAPABILITY_IAM]
+      Parameters:
+        ProjectIdentifier: todoapi
+        Account1: "<account-1>"
+        Account2: ""
+        Account3: "<account-3>"
+        PrimaryRegion: us-east-1
+        SecondaryRegion: us-west-2
+        CodePipelineServiceRole: ${CIBase.PipelineRole.CodePipelineServiceRole}
+        CodeBuildServiceRole: ${CIBase.PipelineRole.CodeBuildServiceRole}
+        SecondaryArtifactBucket: ${CIBase.PreReq2nd.ArtifactBucket}
+        SecondaryKMSKey: ${CIBase.PreReq2nd.KmsKeyArn}
+
+    ProdAccountRole:
+      Extends: Prod
+      Order: 11
+      StackName: pysamci-roles
+      Template: ci-base/xaccount-role.template.yaml
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      Parameters:
+        ProjectIdentifier: todoapi
+        ToolsAccount: "<account-1>"
+        ArtifactBuckets: >
+          ${CIBase.PreReq1st.ArtifactBucket},
+          ${CIBase.PreReq2nd.ArtifactBucket}
+        KmsKeyArns: >
+          ${CIBase.PreReq1st.KmsKeyArn},
+          ${CIBase.PreReq2nd.KmsKeyArn}
+        AdditonalRegions: 1
+        PermissionsBoundary: ""
 
   Pipelines:
     Order: 10
     Layers:
       Extends: Tools
-      StackName: solder100ci-pipeline-layers
+      StackName: pysamci-pipeline-layers
       Template: ci-pipelines/lambda-layer-pipeline.template.yaml
       Capabilities: [CAPABILITY_IAM]
       Parameters:
-        PreReqStack: ${CIBase.PreReq.StackName}
+        PreReqStack: ${CIBase.PreReq1st.StackName}
         SourcePrefix: source.zip
-        Account1: "<account-id>"
-        PipelineName: Solder100-SameAccountSameRegionLambdaLayer
-        StageNames: Develop
-        StackNames: solder100-layers
-        LayerNames: Solder100CommonPy37
-
+        Account1: "<account-1>"
+        Account2: ""
+        Account3: "<account-3>"
+        UseSecondaryRegion: "yes"
+        ConfirmStageTransition: "yes"
+        PipelineName: pysamci-todolayers
+        StageNames: |
+          dev,
+          _,
+          prod
+        StackNames: |
+          todolayer-dev,
+          _,
+          todolayer-prod
+        LambdaRuntime: python3.8
 
     TodoApi:
       Extends: Tools
-      StackName: solder100ci-pipeline-todoapi
+      StackName: pysamci-pipeline-todoapi
       Template: ci-pipelines/todoapi-pipeline.template.yaml
       Capabilities: [CAPABILITY_IAM]
       Parameters:
-        PreReqStack: ${CIBase.PreReq.StackName}
+        PreReqStack: ${CIBase.PreReq1st.StackName}
         SourcePrefix: source.zip
-        PipelineName: Solder100-SameAccountSameRegionTodoApi
-        StageNames: Develop
-        Account1: "<account-id>"
-        StackNames: solder100-todoapi
-        LambdaLayerNames: Solder100CommonPy37
-        LambdaLayerVersions: 1
+        PipelineName: pysamci-todoapi
+        StageNames: |
+          dev,
+          _,
+          prod
+        Account1: "<account-1>"
+        Account2: ""
+        Account3: "<account-3>"
+        UseSecondaryRegion: "yes"
+        ConfirmStageTransition: "yes"
+        StackNames: |
+          todoapi-dev,
+          _,
+          todoapi-prod
