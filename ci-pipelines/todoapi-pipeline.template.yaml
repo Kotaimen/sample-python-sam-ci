@@ -322,6 +322,7 @@ Resources:
               commands:
                 - echo Entered the pre_build phase...
                 - cd ${WORKDIR}
+                - pypi-server -p 8080 src/todoapi/dist &
               finally:
                 - echo Leaving pre_build phrase..
             build:

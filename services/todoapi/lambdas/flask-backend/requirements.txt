@@ -1,1 +1,2 @@
-../../src/todoapi
+-i http://localhost:8080
+todoapi
