@@ -87,6 +87,6 @@ urllib3==1.25.8 ; python_version != '3.4'
 wcwidth==0.1.8
 websocket-client==0.57.0
 werkzeug==0.16.1
-wheel==0.34.2
+wheel==0.38.1
 whichcraft==0.6.1
 wrapt==1.12.0
